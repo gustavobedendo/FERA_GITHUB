@@ -1,0 +1,21 @@
+FERA 3.19
+20/09/2022
+
+Fixed: Minor text selection improvement
+
+-------------------------------------------------
+
+FERA 3.17
+05/09/2022
+
+Fixed: Minor text selection improvement
+
+-------------------------------------------------
+
+FERA 3.16
+01/09/2022
+
+Fixed: OSError: image file is truncated
+Implemented: F2 and F3 to navigate search results
+
+-------------------------------------------------
