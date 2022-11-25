@@ -1,0 +1,178 @@
+LIKE abelhinha
+LIKE morto
+LIKE acesão
+LIKE altas visoes
+LIKE amarela
+LIKE anfetaminas
+LIKE apagar
+LIKE avião
+LIKE bad trip
+LIKE bagana
+LIKE bagulho
+MATCH bala
+LIKE bandeira
+LIKE baque
+LIKE baqueiro
+LIKE baratinado
+LIKE barato
+LIKE barril
+LIKE baseado
+LIKE beck
+MATCH beg
+MATCH bek
+LIKE biritado
+LIKE boca
+LIKE bode
+LIKE bola
+LIKE boleta
+LIKE bolinha
+LIKE bonequinha
+LIKE boqueiro
+LIKE branca
+LIKE breu
+LIKE brizola
+LIKE cabeça feita
+LIKE cachimbo
+LIKE camisa
+LIKE canabis
+LIKE canhao
+LIKE canos
+LIKE careta
+LIKE cascão
+LIKE charrao
+LIKE charuto
+LIKE coca
+LIKE cocaína
+LIKE cogumelo
+LIKE comprimido
+LIKE coquetel
+MATCH corre
+LIKE correria
+LIKE crack
+LIKE crackonha
+LIKE de montão
+LIKE desiree
+LIKE desire
+LIKE devagar pacas
+LIKE diamba
+LIKE doce
+MATCH dura
+LIKE escama
+LIKE estar transando
+LIKE estribadao
+LIKE fazer a cabeca
+LIKE fazer movimento
+LIKE ficar doidao
+LIKE ficar ligadao
+LIKE final de cadeia
+LIKE fininho
+LIKE fissura total
+LIKE fissura
+LIKE fita
+LIKE folia
+LIKE fumo adoidado
+LIKE fumo malocado
+LIKE fumo
+LIKE grinfa
+match gas
+LIKE ingresia ferrada
+LIKE ingresia
+LIKE injuriado
+LIKE ir a luta
+LIKE joaninha
+LIKE johnnie
+LIKE johnny
+LIKE lagarta
+LIKE lance
+LIKE lanca
+LIKE lasca
+LIKE ligadao
+MATCH lsd
+LIKE maconha
+LIKE madera
+LIKE mandraque
+MATCH mane
+LIKE marcha a re
+LIKE mate
+LIKE mercado novo
+LIKE mesclado
+LIKE mexer
+LIKE mistura fina
+LIKE moeda
+LIKE mole
+LIKE mula
+LIKE narco
+LIKE nargs
+LIKE noiado
+LIKE nao da bode
+LIKE nao tem sujeira
+LIKE overdose
+LIKE pacau
+LIKE paia
+LIKE papagaio
+LIKE papel de galo
+LIKE papel
+LIKE pedra
+LIKE pedreiro
+LIKE pegar
+LIKE pico
+LIKE pipa
+LIKE piquenique
+LIKE pirar
+LIKE pista
+LIKE poeirada
+MATCH poh
+MATCH po
+LIKE puxadinha
+LIKE puxar fumo
+LIKE queimar fumo
+LIKE rachar
+LIKE raio
+MATCH roda
+LIKE rojao
+LIKE sair da viagem
+LIKE salgadinho
+LIKE sem mexer
+LIKE smoke
+LIKE soro
+LIKE tapinha
+LIKE torrar
+LIKE transar
+LIKE trouxinha
+LIKE vapor
+LIKE vela
+LIKE verde
+LIKE viajar
+LIKE animo
+LIKE pthc
+LIKE trafico
+LIKE irmao
+LIKE years old
+LIKE moeda
+LIKE meteu bala
+LIKE queladrado
+LIKE verme
+LIKE porco
+LIKE homicidio
+LIKE ameaca
+LIKE morte
+LIKE morrer
+LIKE mata
+LIKE matou
+LIKE arma
+LIKE revolver
+LIKE oitao
+LIKE philip morris
+LIKE Codigo do WhatsApp
+LIKE bang
+LIKE tiro
+LIKE advogado
+LIKE armad
+LIKE preso
+LIKE me matar
+LIKE resgata
+LIKE backup
+LIKE Google verification code
+LIKE Camera (EXIF)
+LIKE morreu
+LIKE .TRASH/
