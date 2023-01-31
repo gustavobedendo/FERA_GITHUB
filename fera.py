@@ -1086,7 +1086,10 @@ class MainWindow():
         try:
             iid = self.treeviewEqs.identify_row(event.y)  
             if(self.treeviewEqs.tag_has('reportlp', iid)):
+                basepdf = self.treeviewEqs.item(iid, 'values')[1]
                 self.eqmenu = tkinter.Menu(global_settings.root, tearoff=0)
+                
+               
                 self.eqmenu.add_command(label='Copiar Índice', image=global_settings.copycat, compound='left',  command=lambda iid=iid: self.copyTOC(iid)) 
                 self.eqmenu.add_command(label='Copiar Nome', image=global_settings.copycat, compound='left',  command=lambda iid=iid: self.copyName(iid))
                 self.eqmenu.add_command(label='Mover para', image=global_settings.copycat, compound='left',  command=lambda iid=iid: self.change_eq_name(iid))
@@ -1309,6 +1312,8 @@ class MainWindow():
             finally:
                 self.editdelcat.grab_release()
         elif(self.treeviewObs.tag_has('tocobs',iid) or self.treeviewObs.tag_has('relobs',iid)):
+            basepdf = None
+            
             self.editdelcat = tkinter.Menu(global_settings.root, tearoff=0)              
             self.copyobsto = tkinter.Menu(self.editdelcat, tearoff=0)
             self.copyobsto.add_command(label="Para o clipboard", image=global_settings.copycat, compound='left', command=lambda: self.addcatpopup(None, 'copiarclip'))      
@@ -1321,7 +1326,9 @@ class MainWindow():
                                        compound='left', command=lambda: self.export_images_table_rtf(False))
             self.copyobsto.add_command(label="Clipboard (Imagens em Tabela - RTF) com anotações", image=global_settings.copycat, \
                                        compound='left', command=lambda: self.export_images_table_rtf(True))
-           
+            if (self.treeviewObs.tag_has('relobs',iid)):
+                basepdf = self.treeviewObs.item(iid,'values')[0]
+                self.editdelcat.add_command(label='Copiar Nome do Relatório', image=global_settings.copycat, compound='left',  command=lambda iid=iid: self.copyName(basepdf))
             self.editdelcat.add_cascade(label='Copiar Páginas', menu=self.copyobsto, image=global_settings.copycat, compound='left')  
             self.editdelcat.add_command(label="Exportar mídias", image=global_settings.imtoFile, compound='left', command= self.exportMidiasFromObs)
             self.treeviewObs.selection_set(iid)
@@ -1443,7 +1450,11 @@ class MainWindow():
             #self.treeviewSearches.selection_set(iid)
             try:
                 if(isinstance(event.widget, ttk.Treeview)):
+                    
                     self.menuexportsearchtobs = tkinter.Menu(global_settings.root, tearoff=0)
+                    if(self.treeviewSearches.tag_has('relsearch', iid)):
+                        basepdf = self.treeviewSearches.item(iid,'values')[0]
+                        self.menuexportsearchtobs.add_command(label='Copiar Nome do Relatório', image=global_settings.copycat, compound='left',  command=lambda iid=iid: self.copyName(basepdf))
                     getobscatas =  self.treeviewObs.get_children('')
                     menucats = tkinter.Menu(self.menuexportsearchtobs, tearoff=0)
                     for obscat in getobscatas:
@@ -1570,17 +1581,20 @@ class MainWindow():
                             cursor.close()
                             tocpdf = global_settings.infoLaudo[basepdf].toc
                             try:
-                                tocname = utilities_general.locateToc(int(paginainit), basepdf, p0y=p0y, tocpdf=tocpdf)[0]
+                                #tocnameprev = 
+                                tocx = utilities_general.locateToc(int(paginainit), basepdf, p0y=p0y, tocpdf=tocpdf)
+                                tocname = tocx[0]
+                                
                                 novoiidtoc = str(iidnovo)+basepdf+tocname
                                 ident= ' '
                                 if(not self.treeviewObs.exists(str(iidnovo)+basepdf)):
                                     indexrelobs = self.qualIndexTreeObs( None, None,str(iidnovo), ident+os.path.basename(basepdf))
-                                    self.treeviewObs.insert(parent=str(iidnovo), iid=(str(iidnovo)+basepdf), text=ident+os.path.basename(basepdf), image=global_settings.imagereportb, index=indexrelobs, tag=('relobs'))
+                                    self.treeviewObs.insert(parent=str(iidnovo), iid=(str(iidnovo)+basepdf), text=ident+os.path.basename(basepdf), image=global_settings.imagereportb, index=indexrelobs, tag=('relobs'), values=(basepdf,))
                                     self.treeviewObs.tag_configure('relobs', background='#e3e1e1')
                                 if(not self.treeviewObs.exists(str(iidnovo)+basepdf+tocname)):
                                     indextocobs = self.qualIndexTreeObs( None, None,str(iidnovo)+basepdf, ident+ident+tocname)
                                     novoiidtoc = self.treeviewObs.insert(parent=str(iidnovo)+basepdf, iid=(str(iidnovo)+basepdf+tocname), text=ident+ident+tocname, index=indextocobs,\
-                                                                         tag=('tocobs'))                                
+                                                                         tag=('tocobs'), values=(0,0,tocx[1],0, tocx[2], basepdf))                                
                                 novoiidtocindex = self.qualIndexTreeObs( paginainit, p0y, (str(iidnovo)+basepdf+tocname))
                                 parenteantigo = self.treeviewObs.parent(item)
                                 self.treeviewObs.move(item, novoiidtoc, novoiidtocindex)
@@ -1591,7 +1605,7 @@ class MainWindow():
                                 utilities_general.printlogexception(ex=ex)
                                 if(not self.treeviewObs.exists(str(iidnovo)+basepdf)):
                                     indexrelobs = self.qualIndexTreeObs( None, None,str(iidnovo), ident+os.path.basename(basepdf))
-                                    self.treeviewObs.insert(parent=str(iidnovo), iid=(str(iidnovo)+basepdf), image=global_settings.imagereportb, text=ident+os.path.basename(basepdf), index=indexrelobs, tag=('relobs'))
+                                    self.treeviewObs.insert(parent=str(iidnovo), iid=(str(iidnovo)+basepdf), image=global_settings.imagereportb, text=ident+os.path.basename(basepdf), index=indexrelobs, tag=('relobs'), values=(basepdf,))
                                     self.treeviewObs.tag_configure('relobs', background='#e3e1e1')
                                 novoiidindex = self.qualIndexTreeObs( paginainit, p0y, (str(iidnovo)+basepdf))
                                 self.treeviewObs.move(item, (str(iidnovo)+basepdf), novoiidindex)
@@ -2302,7 +2316,7 @@ class MainWindow():
                                         lines = ''
                                         try:
                                             filename, extension = os.path.splitext(filepath)
-                                            if(extension in global_settings.listavidformats):
+                                            if(extension.lower() in global_settings.listavidformats):
                                                 #ffmpeg -ss 01:23:45 -i input -frames:v 1 -q:v 2 output.jpg
                                                 comando = f"ffmpeg -y -ss 1 -i \"{filepath}\" -frames:v 1 -q:v 2 teste.png"  
                                                 #popen = subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -5597,12 +5611,12 @@ class MainWindow():
             tocname = tocx[0]
             if(not self.treeviewObs.exists(idobscat+basepdf)):
                 indexrelobs = self.qualIndexTreeObs( None, None,idobscat, ident+os.path.basename(basepdf))
-                self.treeviewObs.insert(parent=idobscat, iid=idobscat+basepdf, text=ident+os.path.basename(basepdf), index=indexrelobs, image=global_settings.imagereportb, tag=('relobs'))
+                self.treeviewObs.insert(parent=idobscat, iid=idobscat+basepdf, text=ident+os.path.basename(basepdf), index=indexrelobs, image=global_settings.imagereportb, tag=('relobs'), values=(basepdf,))
                 self.treeviewObs.tag_configure('relobs', background='#e3e1e1')
             if(not self.treeviewObs.exists(idobscat+basepdf+tocname)):
                 indextocobs = self.qualIndexTreeObs(tocx[1], tocx[2],idobscat+basepdf)
                 self.treeviewObs.insert(parent=idobscat+basepdf, iid=idobscat+basepdf+tocname, text=ident+ident+tocname,\
-                                        index=indextocobs, tag=('tocobs'), values=(0,0,tocx[1],0, tocx[2]))
+                                        index=indextocobs, tag=('tocobs'), values=(0,0,tocx[1],0, tocx[2], basepdf))
             indexinserir = self.qualIndexTreeObs(paginainit, p0y, (idobscat+basepdf+tocname))
             
             if(paginainit==paginafim):
@@ -5621,7 +5635,7 @@ class MainWindow():
             #utilities_general.printlogexception(ex=ex)
             if(not self.treeviewObs.exists(idobscat+basepdf)):
                 indexrelobs = self.qualIndexTreeObs( None, None,idobscat, os.path.basename(basepdf))
-                self.treeviewObs.insert(parent=idobscat, iid=(idobscat+basepdf), text=os.path.basename(basepdf), index=indexrelobs, image=global_settings.imagereportb, tag=('relobs'))
+                self.treeviewObs.insert(parent=idobscat, iid=(idobscat+basepdf), text=os.path.basename(basepdf), index=indexrelobs, image=global_settings.imagereportb, tag=('relobs'), values=(basepdf,))
                 self.treeviewObs.tag_configure('relobs', background='#e3e1e1')
             indexinserir = self.qualIndexTreeObs( paginainit, p0y, (idobscat+basepdf))
             
@@ -5726,8 +5740,9 @@ class MainWindow():
         if(idobscat==None):
            return
         item = self.treeviewSearches.identify_row(event.y)
-        children = self.treeviewSearches.get_children(item)
-        if(len(children)>0 and first):
+        children = utilities_general.countChildren(self.treeviewSearches, item, putcount=False)  
+        #print(children)
+        if(children>0):# and first):
             self.addSeveralMarkers(idobscat, item)
         else:
             resultsearch = global_settings.searchResultsDict[self.treeviewSearches.identify_row(event.y)]
@@ -5977,7 +5992,7 @@ class MainWindow():
             for tupla in global_settings.infoLaudo[global_settings.pathpdfatual].retangulosDesenhados[pagina2]['text']:
                 if(tupla[1].y1>= p1y):
                     p1x = tupla[1].x1
-                    p1y = (tupla[1].y1)
+                    p1y = math.ceil(tupla[1].y1)
             
         elif(self.areaselectionActive):
             p0x = global_settings.infoLaudo[global_settings.pathpdfatual].retangulosDesenhados[paginainit]['areaSelection'][0][1].x0
@@ -5998,9 +6013,11 @@ class MainWindow():
                                         (id_obscat, id_pdf, paginainit, p0x, p0y, paginafim, p1x, p1y, tipo, fixo, conteudo, withalt) VALUES
                                         (?,?,?,?,?,?,?,?,?,?,?,?)
                 """
-                
+                p0y = math.floor(p0y)
+                p1y = math.ceil(p1y)
                 relpath = os.path.relpath(global_settings.pathpdfatual, global_settings.pathdb.parent)
                 id_pdf = global_settings.infoLaudo[global_settings.pathpdfatual].id
+                #print(idobscat, id_pdf, paginainit, p0x, p0y, paginafim, p1x, p1y, tipo, 1)
                 cursor.custom_execute(insert_query_pdf, (idobscat, id_pdf, paginainit, p0x, p0y, paginafim, p1x, p1y, tipo, 1, conteudo, 1 if withalt else False,))
                 iiditem = str(cursor.lastrowid)
                 links_tratados = utilities_general.extract_links_from_page(global_settings.docatual, id_pdf, iiditem, global_settings.pathpdfatual,\
@@ -6012,6 +6029,7 @@ class MainWindow():
                 cursor.custom_execute("PRAGMA journal_mode=WAL")
                 annotation_list = {}
                 for link_t in links_tratados:
+                    print(link_t)
                     cursor.custom_execute(insert_annot, link_t)
                     idannot = cursor.lastrowid                            
                     paginainit = link_t[2]

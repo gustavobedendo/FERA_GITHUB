@@ -732,6 +732,7 @@ def grabNamedDestinations(doc):
     lista = {}
     try:
         dests = doc.xref_get_key(int(key[1].split(" ")[0]), "Dests")
+        #print(dests)
         if("xref" in key[0]):
             iterateXREF_NamedDests(doc, int(dests[1].split(" ")[0]),pismm, p3, p4, pnotmm, xreftopage, lista)
         else:    
@@ -739,10 +740,11 @@ def grabNamedDestinations(doc):
             None
     except Exception as ex:
         #utilities_general.printlogexception(ex=ex)
-        None
+        traceback.print_exc()
         
     
         #sys.exit(0)
+    print(lista)
     return lista
         
 def popupcomandook(window, datatop, databottom, dataleft, dataright):
@@ -1180,11 +1182,13 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
                         doc = fitz.open(pathpdf2)
                         idpdfs.append((idpdf, len(doc)))
                         try:
+                            nameddests = {}
                             try:
                                 nameddests = grabNamedDestinations(doc)
                             except Exception as ex:
+                                traceback.print_exc()
                                 utilities_general.printlogexception(ex=ex)
-                                nameddests = {}
+                                
                             toc = doc.get_toc(simple=False)
                             listatocs = []
                             for entrada in toc:
@@ -1566,7 +1570,9 @@ def loaddb(toplevel, event=None, lb1=None, addrel = None):
                     None
             else:
                 with open(str(global_settings.pathdb)+'.lock', 'w') as fp:
-                    pass
+                    fp.write(str(os.getpid()))
+                    
+                    #pass
             create_edit_recent_cases()
             tocommit = False
             sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))

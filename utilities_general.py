@@ -101,6 +101,8 @@ def extract_links_from_page(doc, idpdf, idobs, pathpdf, paginainit, paginafim, p
                     #dict_of_anottations[link_tratado].append((r.x0, r.y0, r.x1, r.y1, ''))
                 elif('to' in link):
                     link_tratado =link['to']
+                    if("Point" in str(link_tratado)):
+                        link_tratado = None
                     #if(link['to'] not in dict_of_anottations):
                     #    dict_of_anottations[link['to']] = []
                     #dict_of_anottations[link['to']].append((r.x0, r.y0, r.x1, r.y1, ''))
@@ -109,7 +111,7 @@ def extract_links_from_page(doc, idpdf, idobs, pathpdf, paginainit, paginafim, p
                     #if(link['uri'] not in dict_of_anottations):
                     #    dict_of_anottations[link['uri']] = []
                     #dict_of_anottations[link['uri']].append((r.x0, r.y0, r.x1, r.y1, ''))
-        
+                
             if(link_tratado!=None):        
                 
                 links_tratados.append((idpdf, idobs, paginainit, math.ceil(r.x0), \
@@ -301,7 +303,7 @@ def countChildren(treeview, treenode, putcount=True):
     else:
         
         for termonode in treeview.get_children(treenode): 
-            th += countChildren(treeview, termonode) 
+            th += countChildren(treeview, termonode, putcount=putcount) 
         if(treeview.tag_has("relsearchtoc",treenode)):
             textotoc = treeview.item(treenode, 'text')
             if(putcount):
@@ -310,8 +312,8 @@ def countChildren(treeview, treenode, putcount=True):
                 else:
                     treeview.item(treenode, text=textotoc + ' (' + str(th) + ')') 
         else:
+            textoother = treeview.item(treenode, 'text')
             if(putcount):
-                textoother = treeview.item(treenode, 'text')
                 treeview.item(treenode, text=textoother + ' (' + str(th) + ')')  
             if(treeview.tag_has("relsearch",treenode)):
                 valores = treeview.item(treenode, 'values')
