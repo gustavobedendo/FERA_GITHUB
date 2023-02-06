@@ -62,7 +62,7 @@ class MainWindow():
         self.othertags = []
         self.allimages = {}
         self.totalMov = 16
-        self.globalFrame = tkinter.PanedWindow(sashwidth=8)
+        self.globalFrame = ttk.PanedWindow(orient=tkinter.HORIZONTAL)
         self.positions = [None] * 10
         self.indiceposition = 0
         self.globalFrame.grid(row=0, column=0, sticky="nsew")
@@ -140,7 +140,7 @@ class MainWindow():
         self.docInnerCanvas.bind("<Configure>", self.configureWindow)
         self.labeldocname.config(font=global_settings.Font_tuple_Arial_10, text=os.path.basename(global_settings.pathpdfatual))
         global_settings.root.focus_set()
-        self.globalFrame.sash_place(0, 450,self.winfoy)
+        #self.globalFrame.sash_place(0, 450,self.winfoy)
        
 
     def initUI(self):        
@@ -3201,7 +3201,7 @@ class MainWindow():
             self.notebook.add(self.tocFrame, text="Relatorios", sticky='nsew', image=global_settings.repicon, compound='top')
             self.notebook.add(self.searchFrame, text="Buscas", sticky='nsew', image=global_settings.searchicon, compound='top')
             self.notebook.add(self.obsFrame, text="Marcadores", sticky='nsew', image=global_settings.commenticon, compound='top')
-            self.globalFrame.add(self.infoFrame, minsize=50)
+            self.globalFrame.add(self.infoFrame)
             self.treeviewObs.tag_configure('relobs', background='#e3e1e1')
             self.allobs = {}
             self.allobsbyitem = {}
@@ -5092,7 +5092,7 @@ class MainWindow():
             self.docOuterFrame.grid(row=0, column=0, sticky='nsew', padx=0, pady=0)
             self.docOuterFrame.rowconfigure(1, weight=1)
             self.docOuterFrame.columnconfigure(0, weight=1)
-            self.globalFrame.paneconfig(self.swapframes, minsize=global_settings.root.winfo_screenwidth()/2)
+            #self.globalFrame.paneconfig(self.swapframes, minsize=global_settings.root.winfo_screenwidth()/2)
             
             self.toolbar = tkinter.Frame(self.docOuterFrame,bg=self.bg, borderwidth=2, relief='groove')     
             
