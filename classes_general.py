@@ -8,6 +8,7 @@ import utilities_general, classes_general
 import global_settings, sqlite3, subprocess
 import tkinter, platform, webbrowser
 from functools import total_ordering
+from tkinter.filedialog import askopenfilename
 from tkinter.filedialog import asksaveasfilename
 import shutil, os, math, fitz
 from pathlib import Path
@@ -44,7 +45,7 @@ class Custom_Cursor(sqlite3.Cursor):
     def custom_execute(self, command, arguments=None, raise_ex=True, show_popup=True, timeout=0):
         
         try:
-            print(command)
+            #print(command)
             if(timeout!=0):
                 execute_thread = threading.Thread(target=self.execute_with_timeout, args=(command, arguments,), daemon=True)
                 execute_thread.start()
@@ -99,6 +100,8 @@ class Custom_Database(sqlite3.Connection):
         return super(Custom_Database, self).cursor(Custom_Cursor)
 
 
+
+
 class Splash_window():
     def __init__(self, root):
         self.window = tkinter.Toplevel(root)
@@ -127,7 +130,103 @@ class Indexing_window():
 class PixorgFake():
     def __init__(self):
         self.width = 596
-        self.height = 842        
+        self.height = 842
+
+class Linux_Open_With():
+    def __init__(self):
+        try:
+            self.window = tkinter.Toplevel(global_settings.root)
+            self.window.protocol("WM_DELETE_WINDOW", lambda: None)
+            self.window.rowconfigure(1, weight=1)
+            self.window.geometry('600x800')
+            self.window.columnconfigure(1, weight=1)
+            self.window.title("Abrir com:")
+            self.labelask = tkinter.Label(self.window, text="Lista de Programas")
+            self.labelask.grid(row=0, column=0, columnspan=3, sticky='nsew', pady=5)
+            self.file_path = None
+            self.programslistbox = tkinter.Listbox(self.window, listvariable = None, selectmode= 'simple', exportselection=False)
+            self.filled = False
+            
+            self.programslistbox.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=0, padx=0)
+            self.programslistboxscroll = ttk.Scrollbar(self.window, orient="vertical")
+            self.programslistboxscroll.grid(row=1, column=2, sticky='nsew')
+            self.programslistboxscroll.config( command = self.programslistbox.yview )
+            self.programslistbox.configure(yscrollcommand=self.programslistboxscroll.set)
+            self.frame = tkinter.Frame(self.window)
+            self.frame.grid(row=2, column=0, columnspan=2, sticky='nsew', pady=0, padx=0)
+            self.frame.rowconfigure(0, weight=1)
+            self.frame.columnconfigure((0,1), weight=1)
+            self.answer0 = tkinter.Button(self.frame, font=global_settings.Font_tuple_Arial_8,\
+                                          image = global_settings.openbi, compound="right", text="Abrir", command=  partial(self.open_file))
+            self.answer1 = tkinter.Button(self.frame, font=global_settings.Font_tuple_Arial_8,\
+                                          image = global_settings.closebi, compound="right", text="Cancelar", command=  partial(self.cancel))
+                
+                
+            self.select_exec = tkinter.Button(self.frame, font=global_settings.Font_tuple_Arial_8,\
+                                          image = global_settings.openfilebi, compound="right", text="Selecionar executável", command=  partial(self.select_exec))
+            self.select_exec.grid(row=2, column=0, columnspan=3, sticky='ns', pady=5, padx=10)
+            self.answer0.grid(row=3, column=0, sticky='ns', pady=5, padx=10)
+            self.answer1.grid(row=3, column=2, sticky='ns', pady=5, padx=10)
+            self.executable = None
+            
+            
+            self.fill_list()
+        except Exception as ex:
+            utilities_general.utilities_general.printlogexception(ex=ex)
+            
+    def select_exec(self):
+        executavel = askopenfilename(filetypes=[("Todos os arquivos", "*")])
+        print("executavel", executavel)
+        if(executavel!=None and executavel!=''):
+            try:
+                aplicativo_selecionado = executavel
+                result = subprocess.Popen([aplicativo_selecionado, self.file_path])
+            except Exception as ex:
+                utilities_general.utilities_general.printlogexception(ex=ex)
+            finally:
+                self.window.withdraw()
+                self.file_path = None
+                self.executable = None
+            
+    def fill_list(self):
+        if(not self.filled):
+            command = "for app in /usr/share/applications/*.desktop ~/.local/share/applications/*.desktop; do app=\"${app##/*/}\"; echo \"${app::-8}\"; done"
+            result = subprocess.run([command], shell=True, executable="/bin/bash", stdout=subprocess.PIPE)
+            output = result.stdout.decode('utf-8')
+            for linha in output.split("\n"):
+                if(linha.strip()==""):
+                    continue
+                if(linha=="vi" or linha=="vim"):
+                    continue
+                self.programslistbox.insert(tkinter.END, linha)
+            self.filled = True
+            
+    def open_file(self):
+        try:
+            aplicativo_selecionado_index = self.programslistbox.curselection()[0]
+            aplicativo_selecionado = self.programslistbox.get(aplicativo_selecionado_index)
+            #print([aplicativo_selecionado, self.file_path])
+            result = subprocess.Popen([aplicativo_selecionado, self.file_path])
+        except Exception as ex:
+            utilities_general.utilities_general.printlogexception(ex=ex)
+        finally:
+            self.window.withdraw()
+            self.file_path = None
+            self.executable = None
+        
+    def cancel(self):
+        self.window.withdraw()
+        self.executable = None
+        
+    def open_with_window_visible(self, file_path):
+        self.executable = None
+        basename = os.path.basename(file_path)
+        self.file_path = file_path
+        
+        self.window.title(f"{basename} - Abrir com:")
+        self.window.lift()
+        self.window.deiconify()
+        
 
 class Ask_for_margins():
     

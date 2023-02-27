@@ -36,7 +36,7 @@ def initiate_variables(commandline=False):
         Font_tuple_ArialBold_10, Font_tuple_Arial_8, Font_tuple_ArialBold_12, default_font, printorlog, MyManager
     global Font_tuple_Arial_8_italic, Font_tuple_Arial_10_italic, Font_tuple_ArialBoldUnderline_10, Font_tuple_ArialBoldUnderline_12
             
-    
+    global closebi, openbi, open_with_window, openfilebi
     global infoLaudo, pathpdfatual, version, root, minMaxLabels, exitFlag, divididoEm, realce, posicaoZoom, imagedontapply, imageapply
     global continuar, listaRELS, listaTERMOS, queuesair, request_queue, request_queuexml, response_queue, response_queuexml, zoom, release, date_day, date_month, date_year
     global erros_queue, searchqueue, result_queue, update_queue, db_queue, regex_result_list, equipments, selectall, unselectall
@@ -55,6 +55,7 @@ def initiate_variables(commandline=False):
     detached_pdfs = {}
     log_window = None
     equipments= {}
+    open_with_window = None
     idtermopdfs = {}
     log_window_text = None
     listavidformats = [".webm", ".mkv", ".flv", ".flv", ".vob", ".ogv", ".ogg", ".avi",\
@@ -85,10 +86,10 @@ def initiate_variables(commandline=False):
     p1y = None
     dbversion = "1.3"
     version = "3"
-    release = "21"
-    date_day = "10"
-    date_month = "11"
-    date_year = "2022"
+    release = "25"
+    date_day = "23"
+    date_month = "02"
+    date_year = "2023"
     version = f'v{version}.{release}-{date_day}{date_month}{date_year}'
     env = None
     expertmode = True
@@ -349,6 +350,13 @@ def initiate_variables(commandline=False):
     imageapply = tkinter.PhotoImage(data=imageapplyb)
     imagedontapplyb = b'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'
     imagedontapply = tkinter.PhotoImage(data=imagedontapplyb)
+    openb = b'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAP5JREFUSEvFlb0NwjAQhb8MgKigAbEAMAQUSIg9mIcWJqGAkg1AoqcAUbIA6CQ7Ms6fz0nATaTE/t67d46d0PJIWubzc4EVsAUGJZVZU++AOZkKbsCwIrZaAtaVJroecASmjrF0vQ/SCvQNfAKcAXnKaETAdX4FZsC9KYE8+APIJBATkcRyMJlb5wKXUVvAzdyH524+TQVq+Fe3i0o073343Gmo6zwqolB4VA+6wAkYAxdAnD9L/nR1BdKjDbAwcLvPizTUArZPHeAVcLRHCQRw0yn/Fwg5rqsqEsbITvJ/tCWwC7gTikQEvgb2RQJV7tTfNReLGp53VERByhZ9ABfBPhkimNcAAAAAAElFTkSuQmCC'
+    closeb = b'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAaBJREFUSEvV1ElqVkEUhuEnOhMVm6EguATNIBp1ahvJMATssgwhE4euInYgLkBNVBKjBLs9BEEXEKNxIChyoCLH8q97/wyCeGe3mvOe5vtqxDZ/I9sc3z8BXMFNTOPtkBWO4wFmcS/fqSu4jNvYiXWcw+seyEk8wR78wHXc37xTAz7hUAr4Beex0oCcxmPsTvsfcbgFyNlsntnAJSxVkFMleGSez07gRQsQ69HPKHlvuvitQBbL2qDMB7a0paJRPMP+CjKJ73hUteVzmdebupVdMh3DPPZVkPjdldbWcAbvB82pzwfH8BQHG0OO4GfxrqW0PkDcO1raVUM6M+8acp3MidKqPPQ4E+q6gJddPumroBU8y7IT0gU4joVKrmG8+LL2Q54xh78UFAe3ItNoycUi01BXblkTMggQynleeSCCZ4eGGQOSKwkvRCV/PJA1IIKHwQ5U2o/Mf9u/7A0FqQGrOJKCfy1KedVQSrxH8azkx+5DjlEDrmIOO4aVIfK79BMzuNvlg2u4hSksd2k87QXkIW7gTr7T54Mh47eP/f+AX8O3Vhln4XapAAAAAElFTkSuQmCC'
+    openfilei = b'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAAXNSR0IArs4c6QAAAgtJREFUSEu91T9oU1EYBfBzbiKCQpN2MEkp5gV0EgR1E+qfougkODgIOont2MFNii4Ouulm1bXSNaXgJFV3QdTNtHmpaN9Fad4rSEHaeyTFpiZR0lxp33Cn7zu/98H9Q+zwxx3Ox+4A/YXStXXpgQEGOydSxZj0yPLX+c8+03L/gVJuD92iyLcGeNMWQgeNEVzYq9Vha+2PXhFmC6VTkF5L7lxiF1+2BwwUgotOmAVQjqPwCgDXC8JsPjgDYA7A2TgKX/2tOZsLxkE83E6wgA9JFB7drN0W0CjOFkrXKR3pikjv67b2vGega/A/CjomyOSKN0hOAkj5hjb6JKymjU50AH35oEyn48ZwyhdYdzhpDIZBBh1ANl+MKMzUbW3UF8gUgilqY9MMtgAAQgBVkaPJUvWpL5DNFz9B/Bjb8HILICFHYhopHIu/hO98gL6hoQGzlv5O4XbdhvdbJxAuCRhLbJgBsOYD/D6YLwCNxFFtrg3gPUenlag27BO+cV7ywV0Ad8zPdP/ycmWlCUjmPODKJB/HUfWWP1CaFXRw8zRvAXSjlHlC4WrdhtP+QNGCmImXajcbGc3LzhGPjDDu1lOHV77NV3yATK5YIrnw5y5sXtcAEhADFCccIR+AwAUApyUdSmytujFBY2k8OM5pksQ+n+CtHlnJTCS2+qx52f1fYPfu3XmTu/+Hf8Uvccnz9mckCBEAAAAASUVORK5CYII='
+    openbi = tkinter.PhotoImage(data=openb)
+    closebi = tkinter.PhotoImage(data=closeb)
+    openfilebi = tkinter.PhotoImage(data=openfilei)
+
 def initiate_search_process():   
     global  processes, uniquesearchprocess
     if('BUSCA' not in processes):

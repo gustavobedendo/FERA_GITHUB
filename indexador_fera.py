@@ -744,7 +744,7 @@ def grabNamedDestinations(doc):
         
     
         #sys.exit(0)
-    print(lista)
+    #print(lista)
     return lista
         
 def popupcomandook(window, datatop, databottom, dataleft, dataright):

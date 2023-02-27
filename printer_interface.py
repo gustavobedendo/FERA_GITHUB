@@ -10,8 +10,11 @@ import subprocess
 import PIL.ImageWin
 import PIL.Image
 import io
+from tkinter import *
+import tkinter
 import time
 import sys
+from tkinter import Frame
 from tkinter import font # * doesn't import font or messagebox
 from tkinter import messagebox
 from tkinter import ttk
@@ -303,20 +306,20 @@ class Printer():
             estado = 'normal'
             if not temcor:
                 estado = 'disabled'
-            self.popupMenu2 = OptionMenu(configframe, self._color, value="", *choices)
+            self.popupMenu2 = OptionMenu(configframe, self._color, *choices)
             self.popupMenu2.configure(state=estado)
             self.popupMenu2['font'] = font_size(12)
             Label(configframe, text="COR", font=font_size(10)).grid(row = 4, column = 0)
             self.popupMenu2.grid(row = 5, column =0)
             
-            paglabel = Label(configframe, text="Páginas de impressão - Total {}):".format(len(self.docprint)))
+            paglabel = tkinter.Label(configframe, text="Páginas de impressão - Total {}):".format(len(self.docprint)))
             paglabel['font'] = font_size(10)
             paglabel.grid(row = 6, column = 0, pady=(10, 5))
            # 
            
-            self.avisolabel = Label(configframe, text="", fg='red')
+            self.avisolabel = tkinter.Label(configframe, text="", fg='red')
             self.avisolabel.grid(row = 8, column =0, pady=(0, 10,), sticky='ew')
-            self.pagvar = StringVar(configframe)
+            self.pagvar = tkinter.StringVar(configframe)
             
             
             
@@ -328,7 +331,7 @@ class Printer():
             
             #------------------------------------------------------------
             
-            self.pageframe = Frame(mainframe)
+            self.pageframe = tkinter.Frame(mainframe)
             self.pageframe.grid(row=1, column=0, sticky='nsew', padx = 10, pady=10)
             self.pageframe.columnconfigure(0, weight = 1)
             self.pageframe.rowconfigure(2, weight = 1)
@@ -337,13 +340,13 @@ class Printer():
             self.progressprint.grid(row=0, column=0, sticky='nsew', pady=5)
             self.progressprint.grid_remove()
             
-            controlpageframe = Frame(self.pageframe)
+            controlpageframe = tkinter.Frame(self.pageframe)
             controlpageframe.grid(row=1, column=0, sticky='nsew')
             controlpageframe.columnconfigure((0,1,3,4), weight = 1)
             controlpageframe.columnconfigure(2, weight = 2)
             controlpageframe.rowconfigure(1, weight = 1)
             
-            self.canvaspageframe = Frame(self.pageframe)
+            self.canvaspageframe = tkinter.Frame(self.pageframe)
             self.canvaspageframe.grid(row=2, column=0, sticky='nsew')
             self.canvaspageframe.columnconfigure(0, weight = 1)
             self.canvaspageframe.rowconfigure(0, weight = 1)
@@ -357,7 +360,7 @@ class Printer():
             imNP = PhotoImage(data=nextPage)
             imLP = PhotoImage(data=lastPage)
             
-            self.fp = Button(controlpageframe, image=imFP)
+            self.fp = tkinter.Button(controlpageframe, image=imFP)
             self.fp.image = imFP
             self.fp.grid(column=0, row=0, sticky='e', padx = 5)  
             self.fp.config(command=lambda: self.manipulatePagesByClick('first'))
@@ -653,7 +656,7 @@ def go():
     global root
     try:
         global root
-        root = Tk()
+        root = tkinter.Tk()
         printerapp = Printer()
         _filename = sys.argv[1]
         widthdoc = int(sys.argv[2])

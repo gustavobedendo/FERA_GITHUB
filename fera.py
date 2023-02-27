@@ -115,6 +115,8 @@ class MainWindow():
         self.colorquad = (21, 71, 150, 85)
         self.colorlink = (175, 200, 240, 95)
         self.initUI()
+        
+        #global_settings.root.update_idletasks() 
         self.window_search_info = classes_general.Search_Info_Window(global_settings.root, self.docInnerCanvas.winfo_rooty())
         global_settings.splash_window.window.destroy()
         global_settings.root.attributes("-alpha", 1.0)
@@ -150,6 +152,7 @@ class MainWindow():
             self.leftPanel()
             self.createTopBar()
             self.drawCanvas()
+            global_settings.root.update() 
             global_settings.root.resizable(True, True)
             self.selectReport(self.primeiro)
             self.checkUpdates()
@@ -3829,6 +3832,7 @@ class MainWindow():
                                                                  print(capture_output)
                                                                  utilities_general.printlogexception(ex=capture_output)
                                                              except Exception as ex:
+                                                                 None
                                                                  utilities_general.printlogexception(ex=ex)
                                                                  try:
                                                                      webbrowser.open_new_tab(filepath)
@@ -3872,14 +3876,28 @@ class MainWindow():
                                                              myenv['XDG_CONFIG_HOME'] = XDG_CONFIG_HOME
                                                              myenv['XDG_DATA_DIRS'] = XDG_DATA_DIRS
                                                              myenv['XDG_CONFIG_DIRS'] = XDG_CONFIG_DIRS                                                             
-                                                             capture_output = subprocess.run(openfile, check=True, env=myenv, capture_output=True)
-                                                             utilities_general.printlogexception(ex=capture_output)
+                                                             proc = subprocess.check_output(openfile)
+                                                             #time.sleep(0.4)
+                                                             #poll = proc.poll()
+                                                             #print(proc.pid)
+
+                                                             #if poll is not None:
+                                                             #    raise Exception("Poll is None")
                                                          except Exception as ex:
                                                              utilities_general.printlogexception(ex=ex)
+                                                             if(global_settings.open_with_window == None):
+                                                                 global_settings.open_with_window = classes_general.Linux_Open_With()
+                                                             global_settings.open_with_window.open_with_window_visible(filepath)
+                                                             #
                                                              try:
-                                                                 webbrowser.open_new_tab(filepath)
-                                                             except:                                                                 
-                                                                 utilities_general.popup_window('O arquivo não possui um \nprograma associado para abertura!', False)
+                                                                 None
+                                                                 #mimelist_path = os.path.join(HOME, ".local", "share", "applications", "mimeapps.list")
+                                                                 #mimelist_path = os.path.join(HOME, ".config", "mimeapps.list")
+                                                                 #self.open_mimelist(mimelist_path)
+                                                                 #webbrowser.open_new_tab(filepath)
+                                                             except:      
+                                                                 None
+                                                                 #utilities_general.popup_window('O arquivo não possui um \nprograma associado para abertura!', False)
                                                  except Exception as ex:
                                                      utilities_general.printlogexception(ex=ex)
                                                      utilities_general.popup_window('O arquivo não possui um \nprograma associado para abertura!', False)
@@ -3888,6 +3906,11 @@ class MainWindow():
                        self.initialPos = None                       
        except Exception as ex:
            utilities_general.printlogexception(ex=ex)
+           
+    def open_mimelist(self, path):
+        with open(path, 'r') as mime:
+            lines = mime.readlines()
+            print(lines)
           
     def find_similar(self, bytes_from_image, arquivo):
         
@@ -3927,6 +3950,11 @@ class MainWindow():
                 doc.close()
             except Exception as ex:
                 utilities_general.printlogexception(ex=ex)
+                
+    def show_open_with_window(self, filepath):
+        if(global_settings.open_with_window == None):
+            global_settings.open_with_window = classes_general.Linux_Open_With()
+        global_settings.open_with_window.open_with_window_visible(filepath)
 
     def rightClick_link_or_obs(self, event=None):       
         posicaoRealY0Canvas = self.vscrollbar.get()[0] * (self.scrolly) + event.y
@@ -3944,6 +3972,11 @@ class MainWindow():
                      filepath = Path(utilities_general.get_normalized_path(os.path.join(Path(global_settings.pathpdfatual).parent,arquivo)))    
                      menusaveas = tkinter.Menu(global_settings.root, tearoff=0)
                      menusaveas.add_command(label="Salvar como", command= lambda : self.saveas(os.path.basename(filepath), filepath))
+                     if global_settings.plt == "Linux":
+                         print("Teste")
+                         
+                         menusaveas.add_command(label="Abrir com:", command= partial(self.show_open_with_window, filepath))
+                     
                      try:
                          img = global_settings.docatual.extract_image(xref)
                          #print(img)
@@ -5739,10 +5772,14 @@ class MainWindow():
            idobscat, obscat  = self.add_edit_category('add','')
         if(idobscat==None):
            return
+        items = self.treeviewSearches.selection()
         item = self.treeviewSearches.identify_row(event.y)
         children = utilities_general.countChildren(self.treeviewSearches, item, putcount=False)  
         #print(children)
-        if(children>0):# and first):
+        if(len(items)>1):
+            for item in items:
+                self.addSeveralMarkers(idobscat, item)
+        elif(children>0):# and first):
             self.addSeveralMarkers(idobscat, item)
         else:
             resultsearch = global_settings.searchResultsDict[self.treeviewSearches.identify_row(event.y)]

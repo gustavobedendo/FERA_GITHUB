@@ -201,6 +201,8 @@ def popup_window(texto, sair, imagepcp=None):
     windowpopup.bind('<Escape>',  lambda e: popupcomandook(sair, windowpopup))
     return windowpopup
 
+
+
 def printlogexception(printorlog='print', ex=None):
     
     #if(global_settings.log_window==None):
