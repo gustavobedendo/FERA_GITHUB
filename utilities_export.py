@@ -267,12 +267,13 @@ class Export_Images_To_Table():
                                 try:
                                     filename, extension = os.path.splitext(filepath)
                                     if(extension in global_settings.listavidformats):
-                                        comando = f"ffmpeg -y -ss 1 -i \"{filepath}\" -frames:v 1 -q:v 2 teste.png"  
+                                        executavel = os.path.join(utilities_general.get_application_path(), "ffmpeg")
+                                        comando = f"\"{executavel}\" -y -ss 1 -i \"{filepath}\" -frames:v 1 -q:v 2 teste.png"  
                                         #popen = subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                                         popen = subprocess.run(comando,universal_newlines=True, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
                                         #return_code = popen.wait()
                                         if(not os.path.exists("teste.png")):
-                                            comando = f"ffmpeg -y -ss 0 -i \"{filepath}\" -frames:v 1 -q:v 2 teste.png"                                              
+                                            comando = f"\"{executavel}\" -y -ss 0 -i \"{filepath}\" -frames:v 1 -q:v 2 teste.png"                                              
                                             #popen = subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                                             popen = subprocess.run(comando,universal_newlines=True, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
                                             #return_code = popen.wait()

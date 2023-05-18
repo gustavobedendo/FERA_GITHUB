@@ -12,7 +12,7 @@ import queue as queue
 import tkinter.font as tkfont
 import process_functions
 import utilities_general
-import math, psutil, sys
+import math, sys
 #from vosk import Model
 from tkinter import ttk
 from queue import PriorityQueue
@@ -86,9 +86,9 @@ def initiate_variables(commandline=False):
     p1y = None
     dbversion = "1.3"
     version = "3"
-    release = "25"
-    date_day = "23"
-    date_month = "02"
+    release = "26"
+    date_day = "18"
+    date_month = "05"
     date_year = "2023"
     version = f'v{version}.{release}-{date_day}{date_month}{date_year}'
     env = None
@@ -123,7 +123,7 @@ def initiate_variables(commandline=False):
     db_queue = queue.Queue()
     minMaxLabels = 5    
     exitFlag = False
-    nthreads = math.ceil(psutil.cpu_count(logical = False)*0.8)
+    nthreads = math.ceil(os.cpu_count()*0.7)
     processing_threads = [None] * nthreads
     continuar = True    
     divididoEm = 1    
@@ -177,7 +177,7 @@ def initiate_variables(commandline=False):
     Font_tuple_ArialBoldUnderline_10 = tkfont.Font(family ="Helvetica", size=9, weight="bold", underline=1)
     Font_tuple_ArialBold_12 = tkfont.Font(family ="Helvetica", size=11, weight="bold")
     Font_tuple_ArialBoldUnderline_12 = tkfont.Font(family ="Helvetica", size=11, weight="bold", underline=1)
-    tkfont.Font(family ="Helvetica", size=9)
+    tkfont.Font(family ="Helvetica", size=9, weight="bold")
     root.option_add("*Font", "Helvetica 10") 
     
     

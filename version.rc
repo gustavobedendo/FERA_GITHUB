@@ -1,0 +1,24 @@
+VSVersionInfo(
+        ffi=FixedFileInfo(
+        filevers=(2,0,0,0),
+        prodvers=(2,0,0,0),
+        mask=0x3f,
+        flags=0x0,
+        OS=0x40004,
+        fileType=0x1,
+        subtype=0x0,
+        date=(0, 0)),
+        kids=[StringFileInfo([StringTable(
+        u'040904B0',
+        [StringStruct(u'FileDescription', u'FERA'),
+        StringStruct(u'FileVersion', u'3.0.0.0'),
+        StringStruct(u'InternalName', u'Fera'),
+        StringStruct(u'LegalCopyright', u'None'),
+        StringStruct(u'OriginalFilename', u'FERA'),
+        StringStruct(u'CompanyName', u'Policia Cientifica do Parana'),
+        StringStruct(u'ProductName', u'FERA'),
+        StringStruct(u'ProductVersion', u'3.0.0.0'),
+        StringStruct(u'Language', u'English/Portuguese'),
+        StringStruct(u'LegalTrademarks', u'None')])]), 
+        VarFileInfo([VarStruct(u'Translation', [1033, 1200])])]
+   )

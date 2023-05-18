@@ -662,11 +662,12 @@ class Annotation_Window():
                 if os.path.exists(output_data):
                     os.remove(output_data)
                 #google = False
+                executavel = os.path.join(utilities_general.get_application_path(), "ffmpeg")
                 if(google):
-                    cmd = f"ffmpeg -nostdin -y -i \"{filepath}\" -ac 2 -f wav \"{temp_path}\""
+                    cmd = f"\"{executavel}\" -nostdin -y -i \"{filepath}\" -ac 2 -f wav \"{temp_path}\""
                 else:
                     sample_rate=16000                    
-                    cmd = f"ffmpeg -nostdin -y -i \"{filepath}\" -ar {sample_rate} -ac 1 -f wav \"{temp_path}\""
+                    cmd = f"\"{executavel}\" -nostdin -y -i \"{filepath}\" -ar {sample_rate} -ac 1 -f wav \"{temp_path}\""
                 print(cmd)
                     
                 if subprocess.run(cmd, capture_output=True).returncode != 0:                

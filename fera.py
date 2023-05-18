@@ -51,6 +51,9 @@ class MainWindow():
           elm[:2] != ('!disabled', '!selected')]
     
     def __init__(self):
+        def _executable_exists(name):
+            return subprocess.call(["which", name],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0
         self.previousSearchesWindow = None
         self.previous_simple_searches = []
         self.lista_executaveis = ['Escutar e transcrever']        
@@ -116,6 +119,7 @@ class MainWindow():
         self.colorlink = (175, 200, 240, 95)
         self.initUI()
         
+            
         #global_settings.root.update_idletasks() 
         self.window_search_info = classes_general.Search_Info_Window(global_settings.root, self.docInnerCanvas.winfo_rooty())
         global_settings.splash_window.window.destroy()
@@ -142,6 +146,8 @@ class MainWindow():
         self.docInnerCanvas.bind("<Configure>", self.configureWindow)
         self.labeldocname.config(font=global_settings.Font_tuple_Arial_10, text=os.path.basename(global_settings.pathpdfatual))
         global_settings.root.focus_set()
+        if(plt == 'Linux' and not _executable_exists("xclip")):
+            utilities_general.popup_window("A biblioteca XCLIP parece não estar instalada!\nAlgumas funcionalidades podem apresentar problemas.\nFavor instalar o pacote XCLIP (sudo apt install xclip)", False)
         #self.globalFrame.sash_place(0, 450,self.winfoy)
        
 
@@ -2321,13 +2327,14 @@ class MainWindow():
                                             filename, extension = os.path.splitext(filepath)
                                             if(extension.lower() in global_settings.listavidformats):
                                                 #ffmpeg -ss 01:23:45 -i input -frames:v 1 -q:v 2 output.jpg
-                                                comando = f"ffmpeg -y -ss 1 -i \"{filepath}\" -frames:v 1 -q:v 2 teste.png"  
+                                                executavel = os.path.join(utilities_general.get_application_path(), "ffmpeg")
+                                                comando = f"\"{executavel}\" -y -ss 1 -i \"{filepath}\" -frames:v 1 -q:v 2 teste.png"  
                                                 #popen = subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                                                 popen = subprocess.run(comando,universal_newlines=True, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
                                                 #return_code = popen.wait()
                                                 
                                                 if(not os.path.exists("teste.png")):
-                                                    comando = f"ffmpeg -y -ss 0 -i \"{filepath}\" -frames:v 1 -q:v 2 teste.png"                                              
+                                                    comando = f"\"{executavel}\" -y -ss 0 -i \"{filepath}\" -frames:v 1 -q:v 2 teste.png"                                              
                                                     #popen = subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                                                     popen = subprocess.run(comando,universal_newlines=True, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
                                                     

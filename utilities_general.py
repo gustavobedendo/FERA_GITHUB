@@ -628,6 +628,9 @@ def extract_text_from_page(doc, pagina, deslocy, topmargin, bottommargin, leftma
 
 
 def copy_to_clipboard(tipo, conteudo):
+    def _executable_exists(name):
+        return subprocess.call(["which", name],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0
     if(tipo=="rtf"):
         if plt == 'Windows':                        
             CF_RTF = win32clipboard.RegisterClipboardFormat("Rich Text Format")
@@ -636,7 +639,10 @@ def copy_to_clipboard(tipo, conteudo):
             win32clipboard.SetClipboardData(CF_RTF, conteudo)
             win32clipboard.CloseClipboard()
         elif plt == 'Linux':
-            subprocess.Popen(['xclip', '-selection', 'clipboard', '-t', 'text/rtf'], stdin=subprocess.PIPE).communicate(conteudo)
+            if(_executable_exists("xclip")):
+                subprocess.Popen(['xclip', '-selection', 'clipboard', '-t', 'text/rtf'], stdin=subprocess.PIPE).communicate(conteudo)
+            else:
+                popup_window("Não foi identificada biblioteca compatível para CLIPBOARD - Favor instalar o pacote XCLIP", False)
 
 def connectDB(dbpath='', timeout=10, maxrepeat=-1,  check_same_thread_arg=True):
     #hasconn = False
