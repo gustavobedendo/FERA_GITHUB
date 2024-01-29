@@ -189,7 +189,7 @@ class Export_Images_To_Table():
             textonatabela = ""
             pinit = None
             pfim = None
-            textoselecao = "[...]\\line"
+            textoselecao = "(...)\\line"
             listalinks = {}
             listaaprocessar = []                
             lista = []
@@ -226,6 +226,7 @@ class Export_Images_To_Table():
                 margemesq = (global_settings.infoLaudo[pathdocespecial].me/25.4)*72
                 margemdir = global_settings.infoLaudo[pathdocespecial].pixorgw-((global_settings.infoLaudo[pathdocespecial].md/25.4)*72)
                 size = 0.0666666667*intervalo-10, 450    
+                print(size)
                 japegos = set()   
                 japegos2 = set()
                 for pagina in range(pinit2, pfim2+1):
@@ -247,7 +248,7 @@ class Export_Images_To_Table():
                             rect = fitz.Rect(r.x0-1, r.y0-5, r.x1, r.y1+5)
                             file_on_pdf = docespecial[pagina].get_textbox(rect).strip()
                             
-                            print(file, 'x', file_on_pdf, 'y', rect)
+                            #print(file, 'x', file_on_pdf, 'y', rect)
                             mediay = (r.y1 + r.y0) / 2.0    
                             if(p1y >= mediay and p0y <= mediay and (file, pathdocespecial) not in imagens):
                                 if("#" in file):
@@ -292,7 +293,8 @@ class Export_Images_To_Table():
                                                 anexosset.append(os.path.basename(pathdocespecial))
                                     else:
                                         with Image.open(filepath) as imx:
-                                            imx.thumbnail(size, Image.ANTIALIAS)
+                                            #imx.thumbnail(size,Image.Resampling.LANCZOS)
+                                            
                                             imx.save('teste.png','PNG')
                                             width, height = imx.size
                                         with open('teste.png', 'rb') as f:
@@ -354,10 +356,17 @@ class Export_Images_To_Table():
                             textonatabela += "\\trautofit1\\intbl\\clftsWidth3\\clwWidth9070"
                             textonatabela += poscols
                             cont = 1
-                        twips = cont * largura
+                        #twips = cont * largura
                         img = im[0]
-                        pdforg = im[1]
+                        #pdforg = im[1]
                         width, height = im[4], im[5]
+                        prop = height / width 
+                        twipsw = round(9070 / qtascols) -(56 * 6)
+                        twipsh = round(prop * twipsw)
+                        if(twipsh / 11200 > 1):
+                            twipsh = 11200
+                            twipsw /= 11200
+                        #print(twipsw, twipsh)
                         pngtohex = im[3]
                         superscript = ""
                         if(len(anexosset)>1):
@@ -365,7 +374,7 @@ class Export_Images_To_Table():
                         flslegenda = "{{ }}{{\\fs18\\f2(Fls. {})}}".format(str(im[2]+1))+superscript
                         legenda = r'\qc\sa120{{\hich\af2\loch\fs18\b\f2\loch Imagem }}{{{{\fs18\f2\field{{\*\fldinst  SEQ Figura \\* ARABIC }}{{\b\fldrslt{{ }}}}}}{{\fs18\f2\b\qc:{{ }}}}{{\fs18\f2\i"{}"}}}}'.format(os.path.basename(img))
                         
-                        picts = "\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs{{\\fs18\\f2\\pict\\picscalex100\\picscaley100\\piccropl0\\piccropr0\\piccropt0\\piccropb0\\picw{}\\pich{}\\pngblip\n{}}}\\line{}\\cell".format(width, height, pngtohex, legenda + flslegenda)                           
+                        picts = "\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs{{\\fs18\\f2\\pict\\picscalex100\\picscaley100\\piccropl0\\piccropr0\\piccropt0\\piccropb0\\picwgoal{}\\pichgoal{}\\pngblip\n{}}}\\line{}\\cell".format(twipsw, twipsh, pngtohex, legenda + flslegenda)                           
                         textonatabela += picts
                         cont += 1
                     except Exception as ex:

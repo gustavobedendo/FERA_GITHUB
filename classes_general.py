@@ -14,11 +14,11 @@ import shutil, os, math, fitz
 from pathlib import Path
 from PIL import Image, ImageTk, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-import speech_recognition as sr
+#import speech_recognition as sr
 #from vosk import Model, KaldiRecognizer
 import wave
 import json
-
+from tkinter import messagebox
 #import vosk
 from tkinter import ttk
 from functools import partial
@@ -45,6 +45,14 @@ class Custom_Cursor(sqlite3.Cursor):
     def custom_execute(self, command, arguments=None, raise_ex=True, show_popup=True, timeout=0):
         
         try:
+            try:
+                quais = ['delete']
+                primeiro = command.split(" ")[0].lower()
+                if(primeiro in quais):
+                    global_settings.is_dirty = True
+            except Exception as ex:
+                utilities_general.utilities_general.printlogexception(ex=ex)
+
             #print(command)
             if(timeout!=0):
                 execute_thread = threading.Thread(target=self.execute_with_timeout, args=(command, arguments,), daemon=True)
@@ -146,7 +154,7 @@ class Linux_Open_With():
             self.file_path = None
             self.programslistbox = tkinter.Listbox(self.window, listvariable = None, selectmode= 'simple', exportselection=False)
             self.filled = False
-            
+            self.allprogramas = set()
             self.programslistbox.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=0, padx=0)
             self.programslistboxscroll = ttk.Scrollbar(self.window, orient="vertical")
             self.programslistboxscroll.grid(row=1, column=2, sticky='nsew')
@@ -177,10 +185,21 @@ class Linux_Open_With():
     def select_exec(self):
         executavel = askopenfilename(filetypes=[("Todos os arquivos", "*")])
         print("executavel", executavel)
-        if(executavel!=None and executavel!=''):
+        if(executavel!=None and executavel!='' and os.path.exists(executavel)):
+            if global_settings.plt == "Windows":
+                aplicativo_selecionado = executavel.replace("/","\\")
             try:
                 aplicativo_selecionado = executavel
                 result = subprocess.Popen([aplicativo_selecionado, self.file_path])
+                if(aplicativo_selecionado not in self.allprogramas):
+                    res=messagebox.askquestion('FERA', 'Deseja adicionar o programa selecionado aos programas recentes?')
+                    if res.lower() == 'sim' or res.lower() == 'yes':
+                        self.programslistbox.insert(tkinter.END, aplicativo_selecionado)
+                        if global_settings.plt == "Windows":
+                            programas = os.path.join(utilities_general.get_application_path(), "programas.txt")
+                            if(os.path.exists(programas)):
+                                with open(programas, 'a') as programs:     
+                                    programs.write(f"\n{aplicativo_selecionado};\n")
             except Exception as ex:
                 utilities_general.utilities_general.printlogexception(ex=ex)
             finally:
@@ -190,15 +209,29 @@ class Linux_Open_With():
             
     def fill_list(self):
         if(not self.filled):
-            command = "for app in /usr/share/applications/*.desktop ~/.local/share/applications/*.desktop; do app=\"${app##/*/}\"; echo \"${app::-8}\"; done"
-            result = subprocess.run([command], shell=True, executable="/bin/bash", stdout=subprocess.PIPE)
-            output = result.stdout.decode('utf-8')
-            for linha in output.split("\n"):
-                if(linha.strip()==""):
-                    continue
-                if(linha=="vi" or linha=="vim"):
-                    continue
-                self.programslistbox.insert(tkinter.END, linha)
+            if global_settings.plt == "Linux":
+                command = "for app in /usr/share/applications/*.desktop ~/.local/share/applications/*.desktop; do app=\"${app##/*/}\"; echo \"${app::-8}\"; done"
+                result = subprocess.run([command], shell=True, executable="/bin/bash", stdout=subprocess.PIPE)
+                output = result.stdout.decode('utf-8')
+                for linha in output.split("\n"):
+                    if(linha.strip()==""):
+                        continue
+                    if(linha=="vi" or linha=="vim"):
+                        continue
+                    self.programslistbox.insert(tkinter.END, linha)
+                    self.allprogramas.add(linha)
+            elif global_settings.plt == "Windows":
+                programas = os.path.join(utilities_general.get_application_path(), "programas.txt")
+                if(os.path.exists(programas)):
+                    with open(programas, 'r') as programs:
+                        linhas = programs.readlines()
+                        for linha in linhas:
+                            if(linha.strip()==""):
+                                continue
+                            programapath = linha.split(";")[0]
+                            if(os.path.exists(programapath)):
+                                self.programslistbox.insert(tkinter.END, programapath.replace("/","\\"))
+                                self.allprogramas.add(programapath)
             self.filled = True
             
     def open_file(self):
@@ -593,9 +626,9 @@ class Annotation_Window():
         self.botaoplay.grid(row=0, column=1, sticky='ns', pady=5)
         self.botaoplay.image = self.play
         
-        self.botaogoogle = tkinter.Button(self.annot_content_frame_buttons, image = self.google, compound='left', text="", command=partial(self.execute_dir, True))
+        """ self.botaogoogle = tkinter.Button(self.annot_content_frame_buttons, image = self.google, compound='left', text="", command=partial(self.execute_dir, True))
         self.botaogoogle.grid(row=0, column=2, sticky='ns', pady=5)
-        self.botaogoogle.image = self.google
+        self.botaogoogle.image = self.google """
         
         #self.botaovosk = tkinter.Button(self.annot_content_frame_buttons, text="VOSK", command=partial(self.execute_dir, False))
         #self.botaovosk.grid(row=0, column=3, sticky='ns', pady=5)
@@ -625,14 +658,14 @@ class Annotation_Window():
         self.globalFrame.add(self.annot_content_frame, minsize=100)
         self.treeview_link.selection_set('main'+str(observation.idobs))
         self.text_box.insert('end', observation.conteudo)
-        self.botaogoogle.config(relief='sunken', state='disabled')
+        #self.botaogoogle.config(relief='sunken', state='disabled')
         #self.botaovosk.config(relief='sunken', state='disabled')
     
     def execute_dir(self, google):
         self.progressindex.grid(row=1, column=0, columnspan=3, sticky='nsew', pady=5)
         self.progressindex.start()
         annotation = self.annotations[int(self.treeview_link.selection()[0])]
-        self.botaogoogle.config(state='disabled')
+        #self.botaogoogle.config(state='disabled')
         #self.botaovosk.config(state='disabled')
         
         try:
@@ -723,7 +756,7 @@ class Annotation_Window():
             print(temp_path)
             utilities_general.printlogexception(ex=ex)
         finally:
-            self.botaogoogle.config(state='normal')
+            #self.botaogoogle.config(state='normal')
             #self.botaovosk.config(state='normal')
             
             self.botaosalvar.config(relief='raised', state='normal')
@@ -753,7 +786,7 @@ class Annotation_Window():
         else:
             self.botaosalvar.config(relief='sunken', state='disabled')
         if('main' in idannot):
-            self.botaogoogle.config(relief='sunken', state='disabled')
+            #self.botaogoogle.config(relief='sunken', state='disabled')
             #self.botaovosk.config(relief='sunken', state='disabled')
             self.botaoplay.config(relief='sunken', state='disabled')
         else:
@@ -762,18 +795,18 @@ class Annotation_Window():
                 filename, file_extension = os.path.splitext(annotations[int(idannot)].link)
                 if(file_extension in self.audio_list_formats):
                     if(len(self.processing)>0):
-                        self.botaogoogle.config(relief='sunken', state='disabled')
+                        None#self.botaogoogle.config(relief='sunken', state='disabled')
                         #self.botaovosk.config(relief='sunken', state='disabled')
                     else:
-                        self.botaogoogle.config(relief='raised', state='normal')
+                        None#self.botaogoogle.config(relief='raised', state='normal')
                         #self.botaovosk.config(relief='raised', state='normal')
                     #self.botaogoogle.grid(row=0, column=2, sticky='ns', pady=5)
                 else:
-                    self.botaogoogle.config(relief='sunken', state='disabled')
+                    None#self.botaogoogle.config(relief='sunken', state='disabled')
                     #self.botaovosk.config(relief='sunken', state='disabled')
                     #self.botaogoogle.grid_forget()
             except:
-                self.botaogoogle.config(relief='sunken', state='disabled')
+                None#self.botaogoogle.config(relief='sunken', state='disabled')
                 #self.botaovosk.config(relief='sunken', state='disabled')
                 #self.botaogoogle.grid_forget()
                 

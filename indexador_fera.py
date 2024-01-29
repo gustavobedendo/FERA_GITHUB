@@ -5,7 +5,7 @@ Created on Fri Oct 30 10:41:59 2020
 @author: gustavo.bedendo
 """
 from tkinter.filedialog import askopenfilename, asksaveasfilename, askopenfilenames
-import tkinter 
+import tkinter, sqlite3
 from tkinter import ttk
 from pathlib import Path
 import os
@@ -35,6 +35,76 @@ class Processar():
         self.mt = mt
         self.mb = mb
         self.md = md
+        
+def build_db_with_reports_commandline(pathdb=None, reports=None):
+    def cleanup_previous_reports(relpathdir):
+        sqliteconn = utilities_general.connectDB(str(pathdb), 5)
+        status = False
+        try:
+            cursor = sqliteconn.cursor()
+            comando = "SELECT  P.id_pdf, P.indexado, P.rel_path_pdf FROM Anexo_Eletronico_Pdfs P where P.rel_path_pdf like :termo"
+            print(comando)
+            cursor.custom_execute(comando, {'termo':'%'+relpathdir+'%'})
+            previouspdfs = cursor.fetchall()
+            for p_pdfs in previouspdfs:
+                idpdf = p_pdfs[0]
+                print(idpdf)
+                cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf), None, False, False)
+                #cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_config", None, False, False)
+                #cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_content", None, False, False)
+                #cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_data", None, False, False)
+                #cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_docsize", None, False, False)
+                #cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_idx", None, False, False)
+                cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Images_id_pdf_"+str(idpdf), None, False, False)
+                cursor.custom_execute("DELETE FROM Anexo_Eletronico_SearchResults where id_pdf = ?", (idpdf,))
+                
+                check_previous_search =  "SELECT DISTINCT C.termo, C.tipobusca, C.id_termo, C.fixo, C.pesquisado  FROM Anexo_Eletronico_SearchTerms C ORDER by 3"
+                cursor.custom_execute(check_previous_search)
+                termosbuscados = cursor.fetchall()
+                for termo in termosbuscados:
+                    id_termo = termo[2]
+                    pesquisados = termo[4].replace("({})".format(idpdf),'')
+                    updateinto2 = "UPDATE Anexo_Eletronico_SearchTerms set pesquisado = ? WHERE id_termo = ?"
+                    cursor.custom_execute(updateinto2, (pesquisados, id_termo))
+
+                cursor.custom_execute("DELETE FROM Anexo_Eletronico_Pdfs where id_pdf = ?", (idpdf,))    
+            sqliteconn.commit()
+            status = True
+            
+        except:
+            status = False
+        finally:
+            if(sqliteconn):
+                sqliteconn.close()
+            return status
+         
+    status = 0
+    try:
+        createdb = False
+        global_settings.pathdb = Path(pathdb)
+        if(not os.path.exists(global_settings.pathdb)):
+            createdb = createNewDbFile(None, None)
+        else:
+            createdb = True
+        
+        if(not createdb):
+            print(f"Fail to create DB on {pathdb}")
+            raise Exception()
+        relpathdir = os.path.relpath(os.path.dirname(reports[0]), global_settings.pathdb.parent)
+        if(cleanup_previous_reports(relpathdir)):
+            for report in reports:
+                print(f"Indexing {report} -->")
+                addrel  = addrel_commandLine(report)
+                if(addrel):
+                    print(f"Indexing {report} --> OK")
+                else:
+                    status = 1
+                    print(f"Indexing {report} --> FAIL")
+    except:
+        traceback.print_exc()
+        status = 1
+    finally:
+        return status
 
 
 
@@ -1295,224 +1365,12 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
 
 
 
-def validate_annotation(sqliteconn, cursor):
-    resulttable = '''SELECT name FROM sqlite_master WHERE type="table" AND name="Anexo_Eletronico_Annotations"'''
-    cursor.custom_execute(resulttable)
-    tableannotacount = cursor.fetchone()
-    if(tableannotacount==None):
-        create_table_annotations = '''CREATE TABLE Anexo_Eletronico_Annotations (
-        id_annot INTEGER PRIMARY KEY AUTOINCREMENT,
-        id_obs INTEGER NOT NULL,
-        id_pdf INTEGER NOT NULL,
-        paginainit INTEGER NOT NULL,
-        p0x INTEGER NOT NULL,
-        p0y INTEGER NOT NULL,
-        paginafim INTEGER NOT NULL,
-        p1x INTEGER NOT NULL,
-        p1y INTEGER NOT NULL,
-        link TEXT DEFAULT '',
-        conteudo TEXT DEFAULT '',
-        CONSTRAINT fk_obs
-            FOREIGN KEY (id_obs)
-                REFERENCES Anexo_Eletronico_Obsitens (id_obs)
-                ON DELETE CASCADE,
-        CONSTRAINT fk_pdf                    
-            FOREIGN KEY (id_pdf)
-                REFERENCES Anexo_Eletronico_Pdfs (id_pdf)
-                ON DELETE CASCADE
-        )
-        '''
-        doc = None
-        cursor.custom_execute(create_table_annotations)  
-        try:
-            updateannots = '''SELECT P.rel_path_pdf, O.paginainit, O.p0x, O.p0y, O.paginafim, O.p1x, O.p1y, O.tipo, O.id_obs, O.fixo, O.status, 
-            O.conteudo, O.arquivo, P.id_pdf, O.id_obs FROM Anexo_Eletronico_Obsitens O, 
-            Anexo_Eletronico_Pdfs P  WHERE
-                O.id_pdf  = P.id_pdf ORDER by 1'''
-            cursor.custom_execute(updateannots)
-            obsitens = cursor.fetchall()
-            
-            pathpdfatual_local = None
-            for obsitem in obsitens:
-                paginainit = obsitem[1]
-                p0x = obsitem[2]
-                p0y = obsitem[3]
-                paginafim = obsitem[4]
-                p1x = obsitem[5]
-                p1y = obsitem[6]
-                tipo = obsitem[7]
-                relpath = obsitem[0]
-                status = obsitem[10]
-                conteudo = obsitem[11]
-                idpdf = obsitem[13]
-                arquivo = obsitem[12]
-                idobs = obsitem[14]
-                ident = ' '
-                pathpdf = utilities_general.get_normalized_path(os.path.join(global_settings.pathdb.parent, relpath))
 
-                if(pathpdf!=pathpdfatual_local):
-                    pathpdfatual_local = pathpdf
-                    doc = fitz.open(pathpdfatual_local)
-                
-                
-                insert_annot = '''INSERT INTO Anexo_Eletronico_Annotations
-                                        (id_pdf, id_obs, paginainit, p0x, p0y, paginafim, p1x, p1y, link, conteudo) VALUES
-                                        (?,?,?,?,?,?,?,?,?,?)'''
-                p0x = obsitem[2]
-                p0y = obsitem[3]
-                p1x = obsitem[5]
-                p1y = obsitem[6]
-                #extract_links_from_page(doc, idpdf, idobs, pathpdf, paginainit, paginafim, p0x, p0y, p1x, p1y)
-                links_tratados = utilities_general.extract_links_from_page(doc, idpdf, idobs, pathpdf, paginainit, paginafim, p0x, p0y, p1x, p1y)
-                cursor.custom_execute("PRAGMA journal_mode=WAL")
-                cursor.custom_executemany(insert_annot, links_tratados)
-  
-                                
-            sqliteconn.commit()
-        except Exception as ex:
-            utilities_general.printlogexception(ex=ex)
-        finally:
-            try:
-                doc.close()
-            except:
-                None
-def update_db_version(sqliteconn, cursor):
-    updateinto2 = "UPDATE FERA_CONFIG set param = ? WHERE config = ?"
-    cursor.custom_execute(updateinto2, (global_settings.dbversion,'dbversion',))
-    sqliteconn.commit()
 
-def necessity_to_validate(cursor):
-    try:
-        select_query = """SELECT config, param FROM FERA_CONFIG """
-        cursor.custom_execute(select_query)    
-        records = cursor.fetchall()
-        nodbversion = True
-        actualdbversion = None
-        for conf in records:
-            if(conf[0]=='dbversion'):
-                nodbversion = False
-                actualdbversion = conf[1]
-                try:
-                    actualdbversion = float(actualdbversion)
-                    if(actualdbversion < float(global_settings.dbversion)):
-                        return True
-                    else:
-                        return False
-                except:
-                    actualdbversion = "1.0"
-                    updateinto2 = "UPDATE FERA_CONFIG set param = ? WHERE config = ?"
-                    cursor.custom_execute(updateinto2, (actualdbversion,'dbversion',))
-                    return True
-        return True
-    except Exception as ex:
-        utilities_general.printlogexception(ex=ex)
 
-def validate_new_db_columns(cursor, must_commit=False):
-       
-    commit = must_commit  
-    try:
-        cursor.custom_execute("ALTER TABLE Anexo_Eletronico_Obsitens ADD COLUMN withalt INTEGER DEFAULT 0", None, False, False)
-        commit = True
-    except Exception as ex:
-        None
-    try:
-        cursor.custom_execute("ALTER TABLE Anexo_Eletronico_Obsitens ADD COLUMN conteudo TEXT DEFAULT ''", None, False, False)
-        commit = True
-    except Exception as ex:
-        None
-    try:
-        cursor.custom_execute("ALTER TABLE Anexo_Eletronico_Obsitens ADD COLUMN arquivo TEXT DEFAULT ''", None, False, False)
-        commit = True
-    except Exception as ex:
-        None
-    try:
-       cursor.custom_execute('ALTER TABLE Anexo_Eletronico_SearchTerms ADD COLUMN pesquisado', None, False, False)
-       commit = True
-    except Exception as ex:
-        None
-    resulttable = '''SELECT name FROM sqlite_master WHERE type="table" AND name="Anexo_Eletronico_SearchResults"'''
-    cursor.custom_execute(resulttable)
-    tableresultcount = cursor.fetchone()
-    if(tableresultcount==None):
-        create_table_searchesresults = '''CREATE TABLE Anexo_Eletronico_SearchResults (
-        id_termo INTEGER NOT NULL,
-        id_pdf INTEGER NOT NULL,
-        pagina INTEGER NOT NULL,
-        init INTEGER NOT NULL,
-        fim INTEGER NOT NULL,
-        toc TEXT,
-        snippetantes TEXT,
-        snippetdepois TEXT,
-        termo TEXT,
-        CONSTRAINT fk_termo
-            FOREIGN KEY (id_termo)
-                REFERENCES Anexo_Eletronico_SearchTerms (id_termo)
-                ON DELETE CASCADE,
-        CONSTRAINT fk_pdf
-        FOREIGN KEY (id_pdf)
-            REFERENCES Anexo_Eletronico_Pdfs (id_pdf)
-            ON DELETE CASCADE
-        )
-        '''
-        cursor.custom_execute(create_table_searchesresults)  
-        commit = True  
 
-        #commit = True 
-    try:
-        addcolumn = "ALTER TABLE Anexo_Eletronico_Obscat ADD COLUMN ordem INTEGER NOT NULL DEFAULT 0"
-        cursor.custom_execute(addcolumn, None, False, False)
-        commit = True  
-        obscats = "SELECT id_obscat FROM Anexo_Eletronico_Obscat"        
-        cursor.custom_execute(obscats)
-        obscats = cursor.fetchall()
-        ordem = 0
-        for obscat in obscats:
-            updateinto2 = "UPDATE Anexo_Eletronico_Obscat set ordem = ? WHERE id_obscat = ?"
-            cursor.custom_execute(updateinto2, (ordem, obscat[0],))
-            ordem += 1
-    except:
-        None
-    try:
-        addcolumn2 = "ALTER TABLE Anexo_Eletronico_Obsitens ADD COLUMN conteudo TEXT"
-        cursor.custom_execute(addcolumn2, None, False, False)
-        commit = True    
-    except Exception as ex:
-        None
-    
-    try:
-        addcolumn2 = "ALTER TABLE Anexo_Eletronico_Pdfs ADD COLUMN pixorgw INTEGER"
-        cursor.custom_execute(addcolumn2, None, False, False)
-        commit = True    
-    except Exception as ex:
-        None
-    try:
-        addcolumn2 = "ALTER TABLE Anexo_Eletronico_Pdfs ADD COLUMN pixorgh INTEGER"
-        cursor.custom_execute(addcolumn2, None, False, False)
-        commit = True    
-    except Exception as ex:
-        None
-    try:
-        addcolumn2 = "ALTER TABLE Anexo_Eletronico_Pdfs ADD COLUMN doclen INTEGER"
-        cursor.custom_execute(addcolumn2, None, False, False)
-        commit = True    
-    except Exception as ex:
-        None
-    try:
-        addcolumn2 = "ALTER TABLE Anexo_Eletronico_Pdfs ADD COLUMN parent_alias TEXT DEFAULT ''"
-        cursor.custom_execute(addcolumn2, None, False, False)
-        commit = True    
-    except Exception as ex:
-        None
-    try:
-        addcolumn2 = "ALTER TABLE Anexo_Eletronico_Pdfs ADD COLUMN zoom_pos INTEGER DEFAULT 0"
-        cursor.custom_execute(addcolumn2, None, False, False)
-        commit = True    
-    except Exception as ex:
-        None    
-    
-    
-        
-    return commit
+
+
  
 def create_edit_recent_cases():
     try:
@@ -1578,11 +1436,11 @@ def loaddb(toplevel, event=None, lb1=None, addrel = None):
             sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
             try:
                 cursor = sqliteconn.cursor()
-                must_validate = necessity_to_validate(cursor)
-                validate_annotation(sqliteconn, cursor)
+                must_validate = utilities_general.necessity_to_validate(cursor)
+                utilities_general.validate_annotation(sqliteconn, cursor)
                 if(must_validate):
-                    tocommit = validate_new_db_columns(cursor, must_validate)
-                    update_db_version(sqliteconn, cursor)
+                    tocommit = utilities_general.validate_new_db_columns(cursor, must_validate)
+                    utilities_general.update_db_version(sqliteconn, cursor)
                 if(isinstance(toplevel, tkinter.Toplevel)):                   
                    toplevel.destroy()                
             except Exception as ex:
@@ -1607,121 +1465,7 @@ def check_clicklistbox(event=None, lb1=None):
         lb1.select_clear(0, 'end')
         
         
-def gather_information_fromdb(sqliteconn):    
-    #doc = None  
-    #sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
-    cursor = sqliteconn.cursor()
-    must_validate = necessity_to_validate(cursor)
-    tocommit = False
-    if(must_validate):
-        tocommit = validate_new_db_columns(cursor, must_validate)
-        update_db_version(sqliteconn, cursor)
-    if(tocommit):
-       sqliteconn.commit() 
-    totalpaginas = 0
-    global_settings.splash_window.window.attributes("-alpha", 255)
-    try:
-        None
-        global_settings.splash_window.window.wm_attributes("-alpha", 255)
-    except:
-        None   
-    select_all_pdfs = '''SELECT  P.id_pdf, P.rel_path_pdf, P.lastpos, P.tipo, P.margemsup, P.margeminf,
-    P.margemesq, P.margemdir, P.hash, P.indexado, P.pixorgw, P.pixorgh, P.doclen, P.parent_alias, P.zoom_pos FROM 
-    Anexo_Eletronico_Pdfs P ORDER BY 4,2
-    '''
-    porcento = 0
-    global_settings.splash_window.label['text'] = f"Reunindo informações ({porcento}%)"
-    cursor.custom_execute(select_all_pdfs)
-    relats = cursor.fetchall()
-    qtos = 0
-    verificados = {}            
-    cont = 0
-    abs_path_pdf = None
-    for r in relats: 
-        abs_path_pdf = utilities_general.get_normalized_path(os.path.join(global_settings.pathdb.parent, str(r[1])))
-        qtos+=1
-        porcento = round(qtos/len(relats)*100, 0)
-        global_settings.splash_window.label['text'] = f"Reunindo informações ({porcento}%)"
-        global_settings.splash_window.label.update()        
-        global_settings.infoLaudo[abs_path_pdf] = classes_general.Relatorio()
-        filename, file_extension = os.path.splitext(abs_path_pdf)
-        if(file_extension.lower()==".pdf"):  
-            idpdf= r[0]
-            doclen = r[12]
-            pixmapw = r[10]
-            pixmaph = r[11]
-            parent_alias = r[13]
-            if(r[12]==None):
-                
-                doc = fitz.open(abs_path_pdf)
-                try:
-                    doclen = len(doc)
-                    pixorg = doc[0].get_pixmap()
-                    pixmapw = int(pixorg.width)
-                    pixmaph = int(pixorg.height)
-                    updateinto2 = "UPDATE Anexo_Eletronico_Pdfs set pixorgw = ?, pixorgh= ?, doclen = ? WHERE id_pdf = ?"
-                    cursor.custom_execute(updateinto2, (int(pixorg.width), int(pixorg.height), doclen, r[0],))
-                    sqliteconn.commit()
-                except Exception as ex:
-                    utilities_general.printlogexception(ex=ex)
-                finally:
-                    doc.close()
-            global_settings.infoLaudo[abs_path_pdf].zoom_pos = r[14]
-            global_settings.infoLaudo[abs_path_pdf].mt = r[4]
-            global_settings.infoLaudo[abs_path_pdf].mb = r[5]
-            global_settings.infoLaudo[abs_path_pdf].me = r[6]
-            global_settings.infoLaudo[abs_path_pdf].md = r[7]
-            global_settings.infoLaudo[abs_path_pdf].rel_path_pdf = r[1]
-            global_settings.infoLaudo[abs_path_pdf].hash = r[8]
-            global_settings.infoLaudo[abs_path_pdf].id = idpdf
-            global_settings.infoLaudo[abs_path_pdf].len = doclen
-           
-            global_settings.infoLaudo[abs_path_pdf].parent_alias = parent_alias
-            if(r[8]==1):
-                global_settings.infoLaudo[abs_path_pdf].pagiansprocessadas = global_settings.infoLaudo[abs_path_pdf].len
-            else:
-                global_settings.infoLaudo[abs_path_pdf].paginasprocessadas = 0
-            totalpaginas += global_settings.infoLaudo[abs_path_pdf].len
-            global_settings.infoLaudo[abs_path_pdf].tipo = r[3]
-            global_settings.infoLaudo[abs_path_pdf].pixorgw = pixmapw
-            global_settings.infoLaudo[abs_path_pdf].pixorgh = pixmaph
-            select_tocs = '''SELECT  T.toc_unit, T.pagina, T.deslocy, T.init FROM 
-            Anexo_Eletronico_Tocs T WHERE T.id_pdf = ? ORDER BY 2,3
-            '''              
-            cursor.custom_execute(select_tocs, (r[0],))
-            tocs = cursor.fetchall()
-            for toc in tocs:
-                global_settings.infoLaudo[abs_path_pdf].toc.append((toc[0], int(toc[1]), int(toc[2]), int(toc[3])))
-            
-            #    global_settings.listaRELS[abs_path_pdf] = (r[0], r[1], abs_path_pdf, (toc[0], int(toc[1]), int(toc[2]), int(toc[3])), 0) 
-            global_settings.infoLaudo[abs_path_pdf].ultimaPosicao=float(r[2])
-            global_settings.infoLaudo[abs_path_pdf].tipo = r[3]
-            global_settings.infoLaudo[abs_path_pdf].id = r[0] 
-            paginasindexadas = 0
-            if(not os.path.exists(abs_path_pdf)):
-                global_settings.infoLaudo[abs_path_pdf].status = 'erro'
-            else:
-                if(r[8]=='' or r[8]==None):
-                    global_settings.infoLaudo[abs_path_pdf].status = 'naoindexado'
-                    global_settings.documents_to_index.append(abs_path_pdf)
-                else:
-                    
-                    hashpdf = str(utilities_general.md5(abs_path_pdf))
-                    if(hashpdf.lower()!=r[8].lower()):
-                        print(abs_path_pdf)
-                        print(hashpdf.lower())
-                        global_settings.infoLaudo[abs_path_pdf].status = 'incompativel'
-                    else:
-                        global_settings.infoLaudo[abs_path_pdf].status = 'indexado'
-                        paginasindexadas = r[12]
-           
-            relatorio_proxy = classes_general.RelatorioSuccint(r[0], global_settings.infoLaudo[abs_path_pdf].toc, global_settings.infoLaudo[abs_path_pdf].len, \
-                                                               pixmapw, pixmaph, r[3], r[4], r[5], r[6], paginasindexadas, \
-                                                                   r[1], abs_path_pdf, r[2])   
-            global_settings.listaRELS[abs_path_pdf] = relatorio_proxy
-            verificados[str(idpdf)] = "OK"              
-            cont+=1  
-    validate_annotation(sqliteconn, cursor)
+
     
 def createNewDbFile(toplevel=None, sqliteconnx=None):
     if(global_settings.pathdb !=None):
@@ -1934,8 +1678,116 @@ def createNewDbFile(toplevel=None, sqliteconnx=None):
         finally:
             if(sqliteconnx==None):            
                 sqliteconn.close()
+                
+"""
+def start_up_app():
+    
+    sqliteconn = None
+    try:
+        if(len(sys.argv) == 1): 
+            import_create_toplevel()            
+            if(global_settings.pathdb == None):
+                return  
+            else:
+                sys.argv.append(str(global_settings.pathdb))
+        global_settings.splash_window = classes_general.Splash_window(global_settings.root)
+        if(len(sys.argv) >= 2): 
+            filename, extension = os.path.splitext(sys.argv[1])
+            if(".pdf" == extension.lower()):
+                pathp = sys.argv[1]
+                global_settings.pathdb = Path(os.path.abspath(sys.argv[1])+".db")  
+                sqliteconn = None
+                tocommit = False
+                if(not os.path.exists(global_settings.pathdb)):
+                    
+                    #print(1)
+                    notindexed = []
+                    notindexed.append(pathp)
+                    global_settings.splash_window.window.deiconify()
+                    global_settings.splash_window.label['text'] = "Criando banco de dados..."
+                    global_settings.splash_window.label.update_idletasks()
+                    createNewDbFile(global_settings.root)   
+                    sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
+                    global_settings.splash_window.label['text'] = "Aguardando definição de margens..."
+                    global_settings.splash_window.label.update_idletasks()
+                    tupleinfo = addrels('relatorio', view=None, pathpdfinput = notindexed, \
+                                                       pathdbext=global_settings.pathdb, rootx=global_settings.root, sqliteconnx=sqliteconn)
+                    global_settings.splash_window.label['text'] = "Carregando ferramenta..."
+                    global_settings.splash_window.label.update_idletasks()
+                else:
+                    sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
+                    #print(2)
+                    cursor = sqliteconn.cursor()
+                    if(os.path.exists(str(global_settings.pathdb)+'.lock')):
+                        window = utilities_general.popup_window(sair=True, texto = \
+                                    "O banco de dados aparentemente está aberto em outra execução!\nO programa irá encerrar para evitar inconsistências.\n"+\
+                                     "Para corrigir esse problema:\nVerifique outras execuções utilizando o mesmo banco de dados\n ou \nApague o arquivo <{}>".\
+                                         format(str(global_settings.pathdb)+'.lock'))
+                        global_settings.root.wait_window(window)                                            
+                    utilities_general.validate_annotation(sqliteconn, cursor)
+                    must_validate = utilities_general.necessity_to_validate(cursor)
+                    
+                    if(must_validate):
+                        tocommit = utilities_general.validate_new_db_columns(cursor, must_validate)
+                        utilities_general.update_db_version(sqliteconn, cursor)
+                    notindexed = []
+                    select_all_pdfs = '''SELECT  P.id_pdf, P.indexado, P.rel_path_pdf FROM 
+                    Anexo_Eletronico_Pdfs P 
+                    '''
+                    try:
+                        cursor.custom_execute(select_all_pdfs, None, True, False)
+                        relats = cursor.fetchall()
+                        notindexed.append(pathp)
+                        for rel in relats:                                   
+                            notindexed.append(os.path.join(global_settings.pathdb.parent, rel[2]))
+                        if(len(notindexed)>0): 
+                            tupleinfo = addrels('relatorio', pathpdfinput = notindexed, pathdbext=sys.argv[1], \
+                                                                   rootx=global_settings.root, sqliteconnx=sqliteconn)
+                    except sqlite3.OperationalError as ex:  
+                        notindexed.append(pathp)
+                        try:
+                            sqliteconn.close()
+                        except:
+                            None
+                        createNewDbFile(global_settings.root) 
+                        sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))                           
+                        tupleinfo = addrels('relatorio', pathpdfinput = notindexed, pathdbext=sys.argv[1], rootx=global_settings.root, sqliteconnx=sqliteconn)                            
+                        indexing = True
+                #indexador_fera.gather_information_fromdb()
+                if(tocommit):
+                    sqliteconn.commit()
+                utilities_general.initiate_indexing_thread()
+                global_settings.initiate_processes()
+                start_time = time.time()
+                start_fera_app() 
+            elif(".db" == extension.lower()):
+                global_settings.pathdb = Path(sys.argv[1])    
+                gotoviewer = False
+                if(len(sys.argv) >= 3 and sys.argv[2]=='1'):
+                    gotoviewer = True  
+                sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
+                
+                utilities_general.gather_information_fromdb(sqliteconn)
+                sqliteconn.close()
+                utilities_general.initiate_indexing_thread()
+                if(not gotoviewer):
+                    global_settings.splash_window.window.withdraw()
+                    App(global_settings.version, gotoviewer)
+                if(global_settings.pathdb==None):
+                    return
+                global_settings.initiate_processes()
+                start_fera_app()  
+        else:
+            print(1)
+    except Exception as ex:
+        utilities_general.printlogexception(ex=ex)
+    finally:
+        try:
+            sqliteconn.close()
+        except:
+            None
 
-        
+"""       
 class import_create_toplevel():
     def __init__(self):
         def solicitarDiretorio(toplevel):

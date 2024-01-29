@@ -275,8 +275,12 @@ def backgroundRendererImage(processed_pages, request_queue, response_queue, queu
         try:
             pedidoPagina = None
 
-            if(not request_queue.empty()):             
-                 pedidoPagina = request_queue.get(0)
+            if(not request_queue.empty()):    
+                try:         
+                    pedidoPagina = request_queue.get(0)
+                except:
+                    continue
+            
             else:
                 time.sleep(0.1)
       

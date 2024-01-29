@@ -11,7 +11,9 @@ Created on Wed Sep 16 13:45:26 2020
 
 @author: gustavo.bedendo
 """
-import tkinter, setproctitle
+
+from threading import Thread
+import tkinter
 import global_settings
 import time, re
 from tkinter import ttk
@@ -20,7 +22,10 @@ import math
 import multiprocessing as mp
 from PIL import Image, ImageTk, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-
+try:
+    import keyboard
+except:
+    pass
 from tkinter.filedialog import askopenfilename, asksaveasfilename, askdirectory
 import subprocess, os, platform
 from pathlib import Path
@@ -30,21 +35,44 @@ from io import BytesIO
 import traceback
 import sqlite3
 import sys
-import indexador_fera
+#import indexador_fera
 from functools import partial
 import shutil
-import getopt
+#import getopt
 
 import xlsxwriter
 import binascii, io
 import utilities_general, utilities_export
 import classes_general, process_functions
 import rtfunicode
+plt = platform.system()
+try:
+    import pygetwindow as gw
+except:
+    None
+""" try:
+    import gi
+except:
+    None
+try:
+    from gi.repository import Gtk
+except:
+    None
+try:
+    import pywinctl as gw
+except:
+    None """
 try:
     import win32clipboard
 except:
     None
-plt = platform.system()
+
+
+try:
+    from pywinauto import Application
+except:
+    None
+
 class MainWindow():    
     def fixed_map(self, option):
         return [elm for elm in self.style.map('Treeview', query_opt=option) if
@@ -54,6 +82,7 @@ class MainWindow():
         def _executable_exists(name):
             return subprocess.call(["which", name],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0
+        self.locations_toplevels = {}
         self.previousSearchesWindow = None
         self.previous_simple_searches = []
         self.lista_executaveis = ['Escutar e transcrever']        
@@ -82,7 +111,7 @@ class MainWindow():
         self._jobscrollpagebymouse = None
         self.style = ttk.Style()
         self.style.configure("Treeview.Heading", font=global_settings.Font_tuple_Arial_10, foreground='#525252')
-        self.style.configure("Treeview", font=global_settings.Font_tuple_Arial_10, rowheight=20, indent=10)
+        self.style.configure("Treeview", font=global_settings.Font_tuple_Arial_10, rowheight=22, indent=10)
         self.style.configure("boldify-results", font=global_settings.Font_tuple_Arial_10)
         self.style.configure("unboldify-results", font=global_settings.Font_tuple_Arial_10)
         self.style.configure("TNotebook.Tab", font=global_settings.Font_tuple_ArialBold_12)
@@ -149,11 +178,14 @@ class MainWindow():
         if(plt == 'Linux' and not _executable_exists("xclip")):
             utilities_general.popup_window("A biblioteca XCLIP parece não estar instalada!\nAlgumas funcionalidades podem apresentar problemas.\nFavor instalar o pacote XCLIP (sudo apt install xclip)", False)
         #self.globalFrame.sash_place(0, 450,self.winfoy)
-       
+
+    
+        #partial   
 
     def initUI(self):        
         start_time = time.time()
         try:
+            
             self.searchedTerms = []
             self.leftPanel()
             self.createTopBar()
@@ -170,9 +202,16 @@ class MainWindow():
             self.cleanup()
             self.free_searches()
             self.check_errors()
+            global_settings.label_warning_error.bind('<Button-1>',  self.open_log_window)
+            
         except Exception as ex:
             utilities_general.printlogexception(ex=ex)
  
+    def open_log_window(self, event=None):
+        global_settings.log_window.deiconify()
+        global_settings.root.after(10, lambda: global_settings.log_window.lift())
+        #global_settings.log_window.lift()
+
     def loadDocOnCanvas(self):
         try:
             global_settings.processed_pages[0] = 0
@@ -218,7 +257,9 @@ class MainWindow():
                 if(pagina in global_settings.infoLaudo[global_settings.pathpdfatual].links):
                     for link in global_settings.infoLaudo[global_settings.pathpdfatual].links[pagina]:
                         r = link['from']
+                        
                         if(posicaoRealY0 >= r.y0 and posicaoRealY0 <= r.y1 and posicaoRealX0 >= r.x0 and posicaoRealX0 <= r.x1):
+                            #print(link)
                             self.docInnerCanvas.config(cursor='hand2')
                             ehLink=True
                             try:
@@ -229,14 +270,26 @@ class MainWindow():
                                     text_link = link['to']
                                 elif('uri' in link):
                                     text_link = link['uri']
-                                
+
+                                if(text_link==""):
+                                    xref = link['xref']
+                                    info = global_settings.docatual.xref_get_key(xref, 'A')
+                                    grupos_search = global_settings.regex_actions_compiled.search(info[1])
+                                    #print(info, grupos_search)
+                                    if(grupos_search==None):
+                                        continue
+                                    grupos = grupos_search.groups()
+                                    if(grupos[-1]=="Launch"):
+                                        text_link += grupos[2]
+                                    elif(grupos[-1]=="GoToR"):
+                                        text_link += f"{grupos[2]}#{grupos[1]}"
                                 texto_file = "Link: " + text_link
                                 label1 = tkinter.Label(self.tw, font=global_settings.Font_tuple_Arial_10, text=texto_file, justify='left',
                                                background='#ededd3', relief='solid', borderwidth=0)
                                 label1.grid(row=0, column=0, sticky='w', pady=0)
                                 cont_row += 1
                             except Exception as ex:
-                                None
+                                utilities_general.printlogexception(ex=ex)
                             break
 
                 if(cont_row==0):
@@ -431,21 +484,33 @@ class MainWindow():
             sobraEspaco = self.docInnerCanvas.winfo_x()
         deslocy = (math.floor(pagina) * global_settings.infoLaudo[global_settings.pathpdfatual].pixorgh * self.zoom_x*global_settings.zoom)
         for link in links:
-            r = link['from'] 
-            arquivo = ''
-            if('file' in link):
-                file = link['file']                
-                arquivo = str(Path(utilities_general.get_normalized_path(os.path.join(Path(utilities_general.get_normalized_path(pdfatualnorm)).parent,file))))  
-            rect = classes_general.Rect()
-            x0k = math.floor(r.x0*self.zoom_x*global_settings.zoom +sobraEspaco)
-            x1k = math.ceil(r.x1*self.zoom_x*global_settings.zoom +sobraEspaco)
-            y0k = math.ceil(((r.y0*self.zoom_x*global_settings.zoom)  +deslocy))
-            y1k = math.ceil(((r.y1*self.zoom_x*global_settings.zoom)  +deslocy))
-            rect.image = utilities_general.create_rectanglex(min(x0k, x1k), min(y0k, y1k), max(x0k, x1k), max(y0k,y1k), (100,100,100,0), link=False, withborder=False, transparent=False)  
-            tag = ('extlink', 'extlink'+pdfatualnorm,'extlink'+pdfatualnorm+str(pagina))
-            rect.idrect = self.docInnerCanvas.create_image(min(x0k, x1k), min(y0k, y1k), image=rect.image, anchor='nw', tags=tag)
-            self.addImagetoList(tag[0], rect) 
-            classes_general.FileTooltip(self.docInnerCanvas, rect.idrect, arquivo, global_settings.pathdb)
+            try:
+                r = link['from'] 
+                arquivo = ''
+                if('file' in link):
+                    file = link['file']     
+                    if(file==""):
+                        xref = link['xref']
+                        info = global_settings.docatual.xref_get_key(xref, 'A')
+                        grupos_search = global_settings.regex_actions_compiled.search(info[1])
+                        if(grupos_search==None):
+                            continue
+                        grupos = grupos_search.groups()
+                        if(grupos[-1]=="Launch"):
+                            file = grupos[2]         
+                    arquivo = str(Path(utilities_general.get_normalized_path(os.path.join(Path(utilities_general.get_normalized_path(pdfatualnorm)).parent,file))))  
+                rect = classes_general.Rect()
+                x0k = math.floor(r.x0*self.zoom_x*global_settings.zoom +sobraEspaco)
+                x1k = math.ceil(r.x1*self.zoom_x*global_settings.zoom +sobraEspaco)
+                y0k = math.ceil(((r.y0*self.zoom_x*global_settings.zoom)  +deslocy))
+                y1k = math.ceil(((r.y1*self.zoom_x*global_settings.zoom)  +deslocy))
+                rect.image = utilities_general.create_rectanglex(min(x0k, x1k), min(y0k, y1k), max(x0k, x1k), max(y0k,y1k), (100,100,100,0), link=False, withborder=False, transparent=False)  
+                tag = ('extlink', 'extlink'+pdfatualnorm,'extlink'+pdfatualnorm+str(pagina))
+                rect.idrect = self.docInnerCanvas.create_image(min(x0k, x1k), min(y0k, y1k), image=rect.image, anchor='nw', tags=tag)
+                self.addImagetoList(tag[0], rect) 
+                classes_general.FileTooltip(self.docInnerCanvas, rect.idrect, arquivo, global_settings.pathdb)
+            except Exception as ex:
+                utilities_general.printlogexception(ex=ex)
     
     def check_errors(self):
         try:
@@ -454,7 +519,7 @@ class MainWindow():
             if(not global_settings.erros_queue.empty()):   
                  
                  erro = global_settings.erros_queue.get(0)
-                 print(erro)
+                 #print(erro)
                  utilities_general.printlogexception(ex=erro[1])
                  if(erro[0]=='2'):
                      print('xyz')
@@ -462,14 +527,14 @@ class MainWindow():
                      global_settings.log_window_text.insert('end',"\n")
                      
                  elif(erro[0]=='3'): 
-                     print('abc')
+                     #print('abc')
                      global_settings.log_window_text.insert('end',erro[1] + " " + erro[2] + "\n")
                      global_settings.log_window_text.insert('end',erro[4] + "\n")
                      global_settings.log_window_text.insert('end',"\n")
                      utilities_general.popup_window("{} - {} \n {}".format(erro[1], erro[2], erro[4]), False)
                      idtermo = str(erro[3])
                      idx = 't'+idtermo
-                     print(idx, (self.treeviewSearches.exists(idx)))
+                     #print(idx, (self.treeviewSearches.exists(idx)))
                      if(self.treeviewSearches.exists(idx)):
                          self.treeviewSearches.item(idx, tags=("termowitherror",))
                      
@@ -533,6 +598,7 @@ class MainWindow():
         if(len(self.previous_simple_searches) > 0 and self.previoussearcheslistbox==None):            
             self.previoussearcheslistbox = tkinter.Listbox(self.previousSearchesWindow, listvariable = None, selectmode= 'simple', exportselection=False)
             self.previoussearcheslistbox.bind('<<ListboxSelect>>', self.previousSearchSelected)
+            
             self.previoussearcheslistbox.grid(row=0, column=0, sticky='nsew', pady=0, padx=0)
             self.scrollprevioussearchesv = ttk.Scrollbar(self.previousSearchesWindow, orient="vertical")
             self.scrollprevioussearchesv.grid(row=0, column=1, sticky='ns')
@@ -723,7 +789,7 @@ class MainWindow():
             contagem = 0
             starttime = time.process_time_ns()
             endtime = time.process_time_ns()
-            while(((endtime-starttime)/1000000) < 100): 
+            while(((endtime-starttime)/1000000) < 200): 
                 endtime = time.process_time_ns()
                 if(not global_settings.result_queue.empty()):
                     try:
@@ -928,6 +994,39 @@ class MainWindow():
             for child in children:
                 self.treeviewEqs.item(child, open=False)
             self.treeviewEqs.item(iid, open=True)
+            
+    def treeview_selection_loc_right(self, event=None, item=None):
+        iid = self.treeviewLocs.identify_row(event.y)  
+        self.treeviewLocs.selection_set(iid)
+        if(self.treeviewLocs.tag_has('locationlp', iid)):
+            return
+        valores = (self.treeviewLocs.item(iid, 'values'))[1:]
+        if("FERA" in self.treeviewLocs.item(iid)['text']):
+            self.treeview_selection_loc(valores)
+        else:
+            webbrowser.open(valores[0])
+            
+    def treeview_selection_loc(self, valores):
+        
+        try: 
+            
+            pid = os.getpid()
+            if(valores not in self.locations_toplevels or not self.locations_toplevels[valores].is_alive()):
+                
+                processo = mp.Process(target=utilities_general.show_locations, args=(valores[0], valores[1], pid,), daemon=True)
+                processo.start()
+                self.locations_toplevels[valores] = processo
+            else:
+                try:
+                    
+                        win = gw.getWindowsWithTitle(f"P{pid} - {valores[1]}")[0]
+                        win.activate()
+                except:
+                    None
+            
+                
+        except Exception as ex:
+            utilities_general.printlogexception(ex=ex)
             
     def treeview_selection(self, event=None, item=None):
         if(event!=None):
@@ -1246,11 +1345,24 @@ class MainWindow():
                                 arquivo  = link['file']
                                 if("#" in arquivo):
                                     continue
+                                if(arquivo==""):
+                                    xref = link['xref']
+                                    info = global_settings.docatual.xref_get_key(xref, 'A')
+                                    grupos_search = global_settings.regex_actions_compiled.search(info[1])
+                                    if(grupos_search==None):
+                                        continue
+                                    grupos = grupos_search.groups()
+                                    if(grupos[-1]=="GoToR"):
+                                        continue
+                                    elif(grupos[-1]=="Launch"):
+                                        arquivo = grupos[2]
                                 pdfatualnorm = utilities_general.get_normalized_path(temppdf)
                                 filepath = str(Path(utilities_general.get_normalized_path(os.path.join(Path(utilities_general.get_normalized_path(pdfatualnorm)).parent,arquivo))))
                                 for obs in pdfs[temppdf][page]:
                                     pm = (r.y0 + r.y1) / 2
-                                    if(pm >= obs[0] and pm <= obs[1]):
+                                    if((r.y0 > obs[0] and r.y1 > obs[1] and r.y0 <= obs[1]) or\
+                                       (r.y0 < obs[0] and r.y1 < obs[1] and r.y1 <= obs[1]) \
+                                       or (pm >= obs[0] and pm <= obs[1])):
                                         shutil.copy2(filepath, os.path.join(path, os.path.basename(arquivo)))
                                         break
                             except Exception as ex:
@@ -1838,7 +1950,7 @@ class MainWindow():
                     estaselecao += '{\\rtlch\\ltrch\\loch\\fs20\\li72\\f2\\i{'+observation.conteudo.encode('rtfunicode').decode('ascii') + '}\\line}'
                 valoresPecial = self.treeviewObs.item(item, 'values')
                 pagi = int(valoresPecial[2].strip())+1
-                estaselecao+=f"[...]\\line"
+                estaselecao+=f"(...)\\line"
                 
                 
                 if(pathdocespecial!=observation.pathpdf):
@@ -1858,7 +1970,7 @@ class MainWindow():
                 p1yinit = observation.p1y-2 
                 if(tiposelecao=='area'):
                     textonatabela += self.ObstoRTf(item, docespecial, pathdocespecial1, tiposelecao, pinit, \
-                                                   pfim, p0xinit, p0yinit, p1xinit, p1yinit, pmin=pinit2, pmax = pfim2, withnote=withnotes)
+                                                   pfim, p0xinit, p0yinit, p1xinit, p1yinit, pmin=pinit2, pmax = pfim2, withnote=withnotes)[0]
                 elif(tiposelecao=='texto'):
                     textonatabela += self.ObstoRTf(item, docespecial, pathdocespecial1, tiposelecao, pinit, pfim, p0xinit,\
                                                    p0yinit, p1xinit, p1yinit, estaselecao=estaselecao, pmin=pinit2, pmax = pfim2, withnote=withnotes)[0]  
@@ -1889,8 +2001,8 @@ class MainWindow():
             if(observation.conteudo!=''):
                 observacao_p1 = "Observação: "
                 textoselecao += '{\\rtlch\\ltrch\\loch\\fs20\\li72\\f2\\b\\ul{'+observacao_p1.encode('rtfunicode').decode('ascii') + '}}'
-                textoselecao += '{\\rtlch\\ltrch\\loch\\fs20\\li72\\f2\\i{'+observation.conteudo.encode('rtfunicode').decode('ascii') + '}\\line}'
-            textoselecao += f"[...] (Fls. {observation.paginainit+1})\\line"
+                textoselecao += '{\\rtlch\\ltrch\\loch\\fs20\\li72\\f2\\i{'+observation.conteudo.encode('rtfunicode').decode('ascii') + '}}'
+            
             pdf = self.treeviewObs.parent(iid)
             child2 = iid
             while(self.treeviewObs.parent(pdf)!=''):
@@ -1913,10 +2025,12 @@ class MainWindow():
             p1xinit = observation.p1x
             p1yinit = observation.p1y-2   
             if(tiposelecao=='texto'):
-                
-                textonatabela, textoselecao = self.ObstoRTf(iid, docespecial, pathdocespecial1, \
-                                                          tiposelecao, pinit, pfim, p0xinit, p0yinit, \
-                                                              p1xinit, p1yinit, estaselecao=textoselecao, pmin=pinit2, pmax = pfim2, withnote=withnotes)
+                textoselecao += f"\\line(...) (Fls. {observation.paginainit+1})"
+            else:
+                textoselecao += f"\\line(Fls. {observation.paginainit+1})"
+            textonatabela, textoselecao = self.ObstoRTf(iid, docespecial, pathdocespecial1, \
+                                                        tiposelecao, pinit, pfim, p0xinit, p0yinit, \
+                                                            p1xinit, p1yinit, estaselecao=textoselecao, pmin=pinit2, pmax = pfim2, withnote=withnotes)
         textofinal = ("{{\\rtf1\\ansi\\deff0{{\\fonttbl{{\\f0\\froman\\fprq2\\fcharset0 Times New Roman;}}{{\\f1\\froman\\fprq2\\fcharset2 Symbol;}}"+
            "{{\\f2\\fswiss\\fprq2\\fcharset0 Arial;}}}}{{\\colortbl;\\red240\\green240\\blue240;\\red221\\green221\\blue221;\\red255\\green255\\blue255;\\red190\\green0\\blue0;}} {}}}").format(textonatabela)
         conteudo = bytearray(textofinal, 'utf8')
@@ -2092,7 +2206,66 @@ class MainWindow():
             children = self.treeviewObs.get_children(item)
             for child in children:
                 self.descendants_obsitem(child, lista)        
+
+    def get_thumbnail(self, filepath):
+        size = 340, 340
+        try:
+            filename, extension = os.path.splitext(filepath)
+            if(extension.lower() in global_settings.listavidformats):
+                #ffmpeg -ss 01:23:45 -i input -frames:v 1 -q:v 2 output.jpg
+                executavel = os.path.join(utilities_general.get_application_path(), "ffmpeg")
+                comando = f"\"{executavel}\" -y -ss 1 -i \"{filepath}\" -frames:v 1 -q:v 2 teste.png"  
+                #popen = subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                popen = subprocess.run(comando,universal_newlines=True, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                #return_code = popen.wait()
+                
+                if(not os.path.exists("teste.png")):
+                    comando = f"\"{executavel}\" -y -ss 0 -i \"{filepath}\" -frames:v 1 -q:v 2 teste.png"                                              
+                    #popen = subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    popen = subprocess.run(comando,universal_newlines=True, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                    
+                    lines = popen.stderr.split("\n")
+                    if(len(lines)>0):
+                        raise classes_general.FFMPEGException(lines)
+                    
+                    #return_code = popen.wait()
+                if(os.path.exists("teste.png")): 
+                    Image.LOAD_TRUNCATED_IMAGES = True
+                    with Image.open("teste.png") as imx:
+                        imx.thumbnail(size, Image.ANTIALIAS)
                         
+                        imx.save('teste.png','PNG')
+                        width, height = imx.size
+                    with open('teste.png', 'rb') as f:
+                        content = f.read()
+                        pngtohex = binascii.hexlify(content).decode('utf8')
+                        #os.remove('teste.png')
+                        
+                        return (340, 340, pngtohex)
+                    
+            else:
+                Image.LOAD_TRUNCATED_IMAGES = True
+                with Image.open(filepath) as imx:
+                    
+                    imx.thumbnail(size, Image.ANTIALIAS)
+                    imx.save('teste.png','PNG')
+                    width, height = imx.size
+                with open('teste.png', 'rb') as f:
+                    content = f.read()
+                    pngtohex = binascii.hexlify(content).decode('utf8')
+                    #os.remove('teste.png')
+                    
+                    return (340, 340, pngtohex)
+        except classes_general.FFMPEGException as ex:
+            utilities_general.printlogexception(ex=ex)
+        except Exception as ex:
+            utilities_general.printlogexception(ex=ex)
+        finally:
+            try:
+                os.remove('teste.png')
+            except:
+                None 
+
     def rtf_encode_char(unichar):
         code = ord(unichar)        
         return '\\u' + str(code if code <= 32767 else code-65536) + '?'
@@ -2130,8 +2303,8 @@ class MainWindow():
                          p1y = margeminf
                      loadedPage = docespecial[pagina]
                      box = fitz.Rect(p0x, p0y, p1x, p1y)
-                     matriz = fitz.Matrix(self.zoom_x*1.05, self.zoom_x*1.05)
-                     pix = loadedPage.get_pixmap(alpha=False, matrix=matriz, clip=box)
+                     matriz = fitz.Matrix(2.5, 2.5)
+                     pix = loadedPage.get_pixmap(alpha=False, matrix=matriz, clip=box, dpi=1200)
                      mode = "RGBA" if pix.alpha else "RGB"
                      imgdata = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
                      pix = None
@@ -2140,27 +2313,35 @@ class MainWindow():
                      imagem = utilities_general.concatVertical(images)
                     
                      if platform.system() == 'Windows' or  platform.system() == 'Linux':    # Windows
-                         output = io.BytesIO()
-                         imagem.save('teste.png','PNG')
-                         with open('teste.png', 'rb') as f:
-                             content = f.read()
-                         os.remove('teste.png')
-                         pngtohex = binascii.hexlify(content).decode('utf8')                         
-                         width, height = imagem.size
-                         pict = "\\par{{\\pict\\picscalex100\\picscaley100\\piccropl0\\piccropr0\\piccropt0\\piccropb0\\picw{}\\pich{}\\pngblip\n{}}}"\
-                             .format(width, height, pngtohex)
-                         docname = os.path.basename(pathdocespecial)
-                         docpagina = ""
-                         if(pmin!=None and pmax!=None and pmin!=pmax):
-                             docpagina = "{{\\fs22\\f2{{ Relat}}\\\'F3rio \\\'22{}\\\'22 -- Fls. {} a {}}}".format(docname, pmin+1, pmax+1)
-                         else:
-                             docpagina = "{{\\fs22\\f2{{ Relat}}\\\'F3rio \\\'22{}\\\'22 -- Fls. {}}}".format(docname, pagina+1)   
-                         
-                         #docpagina = "{{\\fs22\\f2{{ Relat}}\\\'F3rio \\\'22{}\\\'22 -- Fls. {}}}".format(docname, pagi)
-                         textonatabela += ("\\par\\trowd\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\trautofit1\\intbl\\clftsWidth3\\clwWidth9070\\cellx9070 {}\\cell\\row"+\
-                             "\\trowd\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrr\\brdrs\\clbrdrl\\brdrs\\trautofit1\\intbl\\clftsWidth3\\clwWidth9070\\cellx9070{{\\loch\\i\\b\\fs22\\f2 Figura }}{{\\qc\\field{{\\fldinst  SEQ Figura \\\\* ARABIC }}}}"+\
-                         "{{\\qc\\i:{}}}\\cell\\row\\pard\\line").format(pict, docpagina) + "\n"
-                         return textonatabela
+                        output = io.BytesIO()
+                        imagem.save('teste.png','PNG')
+                        with open('teste.png', 'rb') as f:
+                            content = f.read()
+                        os.remove('teste.png')
+                        pngtohex = binascii.hexlify(content).decode('utf8')                         
+                        width, height = imagem.size
+                        ratio = width / height
+                        #preencher = "\\picwgoal9070"
+                        preencher = ""
+                        if(height>width):
+                            preencher = f"\\picwgoal{int(4070/ratio)}\\pichgoal4070"
+                        else:
+                            preencher = f"\\picwgoal9070\\pichgoal{int(9070/ratio)}"
+                        estaselecao  += "{{\\rtlch \\ltrch\\loch\\qc\\pict\\pngblip\\picscalex100\\picscaley100\\piccropl0\\piccropr0\\piccropt0\\piccropb0{}\\pngblip\n{}}}\\line"\
+                            .format(preencher, pngtohex)
+                        docname = os.path.basename(pathdocespecial)
+                        docpagina = ""
+                        if(pmin!=None and pmax!=None and pmin!=pmax):
+                            docpagina = "{{\\fs22\\f2{{ Relat}}\\\'F3rio \\\'22{}\\\'22 -- Fls. {} a {}}}".format(docname, pmin+1, pmax+1)
+                        else:
+                            docpagina = "{{\\fs22\\f2{{ Relat}}\\\'F3rio \\\'22{}\\\'22 -- Fls. {}}}".format(docname, pagina+1)   
+                        
+                        #docpagina = "{{\\fs22\\f2{{ Relat}}\\\'F3rio \\\'22{}\\\'22 -- Fls. {}}}".format(docname, pagi)
+                        textonatabela += ("\\par\\trowd\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\trautofit1\\intbl\\clftsWidth3\\clwWidth9070\\cellx9070{{\\cbpat2\\qc\\loch\\i\\b\\fs22\\f2 TABELA }}{{\\qc\\field{{\\fldinst  SEQ Tabela \\\\* ARABIC }}}}"+\
+                        "{{\\qc:\\i{}}}\\cell\\row"+\
+                            # "\\trowd\\clftsWidth1\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\cellx1\\intbl{{\\cbpat2\\qc\\loch\\b{{TABELA}}}}\\cell\\row"+\
+                            "\\par\\trowd\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\trautofit1\\intbl\\clftsWidth3\\clwWidth9070\\cellx9070 {}\\cell\\row\\pard\\line").format(docpagina, estaselecao) + "\n"
+                        return (textonatabela, estaselecao)
              elif(tiposelecao=='texto'):
                  addreticencias = False
                  if(estaselecao==""):
@@ -2397,7 +2578,7 @@ class MainWindow():
                                         #break
 
                  pagi = pagina+1
-                 estaselecao = estaselecao+f"[...]\\line"           
+                 estaselecao = estaselecao+f"(...)\\line"           
                  docname = os.path.basename(pathdocespecial)
                  if(pmin!=None and pmax!=None and pmin!=pmax):
                      docpagina = "{{\\fs22\\f2{{ Relat}}\\\'F3rio \\\'22{}\\\'22 -- Fls. {} a {}}}".format(docname, pmin+1, pmax+1)
@@ -2541,6 +2722,8 @@ class MainWindow():
             try:
                 for line in a_file:    
                     stripped_line = line.strip()
+                    if(stripped_line[0]=="#"):
+                        continue
                     tipo = stripped_line.split(" ")[0]
                     termo = stripped_line[len(tipo):len(stripped_line)].strip()
                     if((termo.upper(), tipo.upper()) in global_settings.listaTERMOS):
@@ -2900,7 +3083,7 @@ class MainWindow():
         
         
         if("\n" in self.searchVar.get()):
-            print(self.searchVar.get(), self.searchtypeVar.get())
+            #print(self.searchVar.get(), self.searchtypeVar.get())
             old = self.searchVar.get().replace("\n",' ').replace("\r",' ')
             self.entrysearch.delete("0", "end")
             self.entrysearch.insert("0", old)
@@ -2950,6 +3133,29 @@ class MainWindow():
             self.treeviewEqs.configure(yscrollcommand=self.scrolltoc.set)
             self.scrolltoch = ttk.Scrollbar(self.tocFrame, orient="horizontal")
             self.scrolltoch.config( command = self.treeviewEqs.xview )
+            
+            self.locFrame = tkinter.Frame(borderwidth=2, relief='ridge')
+            self.locFrame.rowconfigure(1, weight=1)
+            self.locFrame.columnconfigure((0, 1), weight=1)
+            self.treeviewLocs = ttk.Treeview(self.locFrame, selectmode='browse')
+            #self.collapseeqs = tkinter.Button(self.tocFrame, font=global_settings.Font_tuple_Arial_10, text='Colapsar todos', \
+            #                                  image=global_settings.collapseimg, compound="right", command=self.collapsealleqs)
+            #self.collapseeqs.grid(row=0, column=0,sticky='n', padx=10, pady=5)   
+            
+            #self.expandeqs = tkinter.Button(self.tocFrame, font=global_settings.Font_tuple_Arial_10, text='Expandir todos', \
+            #                                  image=global_settings.expandimg, compound="right", command=self.expandalleqs)
+            #self.expandeqs.grid(row=0, column=1,sticky='n', padx=10, pady=5)   
+            
+            self.treeviewLocs.grid(row=1, column=0, sticky='nsew', columnspan=2)
+            self.treeviewLocs.heading("#0", text="Localizações", anchor="w")
+            self.scrollloc = ttk.Scrollbar(self.locFrame, orient="vertical")
+            self.scrollloc.config( command = self.treeviewLocs.yview )
+            self.treeviewLocs.configure(yscrollcommand=self.scrollloc.set)
+            self.scrollloch = ttk.Scrollbar(self.tocFrame, orient="horizontal")
+            self.scrollloch.config( command = self.treeviewLocs.xview )
+            #self.treeviewLocs.bindtags(('.self.treeviewLocs', 'Treeview', 'post-tree-bind','.','all'))
+            self.treeviewLocs.bind("<1>", lambda e: self.treeview_selection_loc_right(e))
+            
             self.treeviewEqs.configure(xscrollcommand=self.scrolltoch.set)
             self.scrolltoch.grid(row=2, column=0, sticky='ew', columnspan=2)
             self.treeviewEqs.bindtags(('.self.treeviewEqs', 'Treeview', 'post-tree-bind', 'post-tree-teste','.','all'))
@@ -2965,8 +3171,23 @@ class MainWindow():
             self.primeiro = None
             #rels = global_settings.infoLaudo.keys()
             index = 0
-            
+            locations = set()
             for relatorio in sorted(global_settings.infoLaudo):
+                parente = os.path.dirname(relatorio)
+                if(os.path.exists(os.path.join(parente, 'locations'))):
+                    nomeeq = os.path.basename(parente)
+                    if(nomeeq not in locations): 
+                        locations.add(nomeeq)
+                        location = os.path.join(parente, 'locations', 'index.html')
+                        
+                        id = self.treeviewLocs.insert(parent='', index='end', iid=nomeeq, text=f"Localizações {nomeeq} ",\
+                                                image=global_settings.locationsmallicon, tag='locationlp', values=('location', location, f"Localizações {nomeeq}",))
+                        if plt=="Windows":
+                            self.treeviewLocs.insert(parent=id, index='end', text=f"Abrir no FERA",\
+                                                    image=global_settings.feraiconbi, tag='locationlpchild', values=('location', location, f"Localizações {nomeeq}",))
+                        self.treeviewLocs.insert(parent=id, index='end', text=f"Abrir no navegador padrão",\
+                                                image=global_settings.browsericonbi, tag='locationlpchild', values=('location', location, f"Localizações {nomeeq}",))
+                        self.treeviewLocs.item(id, open=True)
                 p = Path(relatorio)
                 pai = p.parent
                 paibase = os.path.basename(pai)
@@ -3037,6 +3258,8 @@ class MainWindow():
                 None
             global_settings.docatual = fitz.open(global_settings.pathpdfatual)
             global_settings.zoom = global_settings.listaZooms[global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos]
+            self.treeviewLocs.tag_configure('locationlp', background='#a1a1a1', font=global_settings.Font_tuple_ArialBoldUnderline_16)
+            self.treeviewLocs.tag_configure('locationlpchild', background='#a1a1a1', font=global_settings.Font_tuple_ArialBold_14)
             self.treeviewEqs.tag_configure('equipmentlp', background='#a1a1a1', font=global_settings.Font_tuple_ArialBoldUnderline_12)
             self.treeviewEqs.tag_configure('reportlp', background='#ebebeb', font=global_settings.Font_tuple_ArialBold_10)     
             self.treeviewEqs.tag_configure('tocpdf', font=global_settings.Font_tuple_Arial_8)   
@@ -3211,6 +3434,7 @@ class MainWindow():
             self.notebook.add(self.tocFrame, text="Relatorios", sticky='nsew', image=global_settings.repicon, compound='top')
             self.notebook.add(self.searchFrame, text="Buscas", sticky='nsew', image=global_settings.searchicon, compound='top')
             self.notebook.add(self.obsFrame, text="Marcadores", sticky='nsew', image=global_settings.commenticon, compound='top')
+            self.notebook.add(self.locFrame, text="Localizações", sticky='nsew', image=global_settings.locationicon, compound='top')
             self.globalFrame.add(self.infoFrame)
             self.treeviewObs.tag_configure('relobs', background='#e3e1e1')
             self.allobs = {}
@@ -3373,6 +3597,8 @@ class MainWindow():
                     for line in a_file: 
                         #print(line)
                         stripped_line = line.strip()
+                        if(stripped_line[0]=="#"):
+                            continue
                         tipo = stripped_line.split(" ")[0].strip()
                         termo = stripped_line[len(tipo):len(stripped_line)].strip()
                         
@@ -3432,7 +3658,7 @@ class MainWindow():
                     #self.uniquesearchprocess2.start() 
                     #self.primeiroresetbuscar = True
                 except Exception as ex:
-                    print(ex)
+                    #print(ex)
                     utilities_general.printlogexception(ex=ex)  
             
     def iterateSearchList(self, event=None, tipo=None):
@@ -3570,9 +3796,13 @@ class MainWindow():
                     init = posicoes[resultsearch.init]
                     fim = posicoes[resultsearch.fim-1]
                     p0x = init[0]
-                    p0y = (init[1]+2)
+                    p0y = (init[1])+5
+                    
                     p1x = fim[2]
-                    p1y = (fim[3]-2)
+                    p1y = (fim[3])
+                    if(p0y>=p1y-1):
+                        p0y = p1y-4
+                    #print(p0x, p0y, p1x, p1y)
                     self.prepararParaQuads(pagina, int(p0x), int(p0y), math.ceil((p1x)), int(p1y), color=self.color, tag=["simplesearch"], apagar=False, enhancetext=True, enhancearea=False, alt=False)
                     atual = ((self.vscrollbar.get()[0]*global_settings.infoLaudo[global_settings.pathpdfatual].len))
                     deslocy = (math.floor(pagina) * global_settings.infoLaudo[global_settings.pathpdfatual].pixorgh * self.zoom_x*global_settings.zoom) + (p0y *  self.zoom_x * global_settings.zoom)                    
@@ -3733,6 +3963,18 @@ class MainWindow():
                                                  atual = round((self.vscrollbar.get()[0]*global_settings.infoLaudo[global_settings.pathpdfatual].len))                                                 
                                          elif('file' in link):
                                              arquivo = link['file']
+                                             if(arquivo==""):
+                                                xref = link['xref']
+                                                info = global_settings.docatual.xref_get_key(xref, 'A')
+                                                grupos_search = global_settings.regex_actions_compiled.search(info[1])
+                                                if(grupos_search==None):
+                                                    continue
+                                                grupos = grupos_search.groups()
+                                                arquivo = grupos[2]
+                                                if(grupos[-1]=="Launch"):
+                                                    arquivo = grupos[2]
+                                                elif(grupos[-1]=="GoToR"):
+                                                    arquivo = f"{grupos[2]}#{grupos[1]}"
                                              arquivosplit = arquivo.split("#")
                                              arquivo = utilities_general.get_normalized_path(arquivosplit[0])
                                              if(len(arquivosplit)>1):
@@ -3836,7 +4078,7 @@ class MainWindow():
                                                                  myenv['XDG_DATA_DIRS'] = XDG_DATA_DIRS
                                                                  myenv['XDG_CONFIG_DIRS'] = XDG_CONFIG_DIRS                                                                 
                                                                  capture_output = subprocess.run(openfile, check=True, env=myenv, capture_output=True)
-                                                                 print(capture_output)
+                                                                 #print(capture_output)
                                                                  utilities_general.printlogexception(ex=capture_output)
                                                              except Exception as ex:
                                                                  None
@@ -3910,14 +4152,16 @@ class MainWindow():
                                                      utilities_general.popup_window('O arquivo não possui um \nprograma associado para abertura!', False)
                                          elif('uri' in link):
                                              webbrowser.open(link['uri'])
-                       self.initialPos = None                       
+                       self.initialPos = None      
+       except TypeError as ex:
+           None
        except Exception as ex:
            utilities_general.printlogexception(ex=ex)
            
     def open_mimelist(self, path):
         with open(path, 'r') as mime:
             lines = mime.readlines()
-            print(lines)
+            #print(lines)
           
     def find_similar(self, bytes_from_image, arquivo):
         
@@ -3960,6 +4204,7 @@ class MainWindow():
                 
     def show_open_with_window(self, filepath):
         if(global_settings.open_with_window == None):
+            #if global_settings.plt == "Linux":
             global_settings.open_with_window = classes_general.Linux_Open_With()
         global_settings.open_with_window.open_with_window_visible(filepath)
 
@@ -3971,45 +4216,57 @@ class MainWindow():
         pagina = math.floor(posicaoRealY0Canvas / (global_settings.infoLaudo[global_settings.pathpdfatual].pixorgh *self.zoom_x*global_settings.zoom))
         menusaveas = None
         for link in global_settings.infoLaudo[global_settings.pathpdfatual].links[pagina]:
-             r = link['from']
-             xref = link['xref']
-             if(posicaoRealX0 >= r.x0 and posicaoRealX0 <= r.x1 and posicaoRealY0 >= r.y0 and posicaoRealY0 <= r.y1):
-                 if('file' in link and os.path.basename(global_settings.pathpdfatual) not in link['file']):
-                     arquivo = link['file']
-                     filepath = Path(utilities_general.get_normalized_path(os.path.join(Path(global_settings.pathpdfatual).parent,arquivo)))    
-                     menusaveas = tkinter.Menu(global_settings.root, tearoff=0)
-                     menusaveas.add_command(label="Salvar como", command= lambda : self.saveas(os.path.basename(filepath), filepath))
-                     if global_settings.plt == "Linux":
-                         print("Teste")
-                         
-                         menusaveas.add_command(label="Abrir com:", command= partial(self.show_open_with_window, filepath))
+            r = link['from']
+            xref = link['xref']
+            if(posicaoRealX0 >= r.x0 and posicaoRealX0 <= r.x1 and posicaoRealY0 >= r.y0 and posicaoRealY0 <= r.y1):
+                if('file' in link and os.path.basename(global_settings.pathpdfatual) not in link['file']):
+                    arquivo = link['file']
+                    if(arquivo==""):
+                        xref = link['xref']
+                        info = global_settings.docatual.xref_get_key(xref, 'A')
+                        grupos_search = global_settings.regex_actions_compiled.search(info[1])
+                        if(grupos_search==None):
+                            continue
+                        grupos = grupos_search.groups()
+                        arquivo = grupos[2]
+                        if(grupos[-1]=="Launch"):
+                            arquivo = grupos[2]
+                    filepath = Path(utilities_general.get_normalized_path(os.path.join(Path(global_settings.pathpdfatual).parent,arquivo)))    
+                    menusaveas = tkinter.Menu(global_settings.root, tearoff=0)
+                    menusaveas.add_command(label="Salvar como", command= lambda : self.saveas(os.path.basename(filepath), filepath))
+                    if global_settings.plt == "Linux":
+                        #print("Teste")
+                        
+                        menusaveas.add_command(label="Abrir com:", command= partial(self.show_open_with_window, filepath))
+                    elif global_settings.plt == "Windows" and False:
+                        menusaveas.add_command(label="Abrir com:", command= partial(self.show_open_with_window, filepath))
                      
-                     try:
-                         img = global_settings.docatual.extract_image(xref)
-                         #print(img)
-                     except:
-                         None
-                     
-                     for link2 in global_settings.infoLaudo[global_settings.pathpdfatual].images[pagina]:
-                          #r = link['from']
-                          xref2 = link2[0]
-                          #print(xref2, xref)
-                          img = global_settings.docatual.extract_image(xref2)
-                          #print(img)
-                          img_bbox = global_settings.docatual[pagina].get_image_bbox(link2)
-                          #print(img_bbox)
-                          if(posicaoRealX0 >= img_bbox.x0 and posicaoRealX0 <= img_bbox.x1 and posicaoRealY0 >= img_bbox.y0 and posicaoRealY0 <= img_bbox.y1):
-                              print("Arquivo:", arquivo)
-                              #menusaveas.add_command(label="Procurar semelhantes", command= lambda : self.find_similar(img['image'], arquivo))
-                              #print(img)
-                              try:
-                                  None
-                                  #img = global_settings.docatual.extract_image(xref)
-                                  
-                              except:
-                                  None
-                              break
-                     break
+                    try:
+                        img = global_settings.docatual.extract_image(xref)
+                        #print(img)
+                    except:
+                        None
+                    
+                    for link2 in global_settings.infoLaudo[global_settings.pathpdfatual].images[pagina]:
+                        #r = link['from']
+                        xref2 = link2[0]
+                        #print(xref2, xref)
+                        img = global_settings.docatual.extract_image(xref2)
+                        #print(img)
+                        img_bbox = global_settings.docatual[pagina].get_image_bbox(link2)
+                        #print(img_bbox)
+                        if(posicaoRealX0 >= img_bbox.x0 and posicaoRealX0 <= img_bbox.x1 and posicaoRealY0 >= img_bbox.y0 and posicaoRealY0 <= img_bbox.y1):
+                            #print("Arquivo:", arquivo)
+                            #menusaveas.add_command(label="Procurar semelhantes", command= lambda : self.find_similar(img['image'], arquivo))
+                            #print(img)
+                            try:
+                                None
+                                #img = global_settings.docatual.extract_image(xref)
+                                
+                            except:
+                                None
+                            break
+                    break
          
         
         deslocy = pagina * global_settings.infoLaudo[global_settings.pathpdfatual].pixorgh * self.zoom_x*global_settings.zoom
@@ -4043,8 +4300,9 @@ class MainWindow():
                 menusaveas.grab_release()
     
     def already_there(self, x1,y1,x2,y2, tag):
-        encloseds1 = self.docInnerCanvas.find_overlapping(x1, y1, x2, y2)
-        encloseds2 = self.docInnerCanvas.find_enclosed(x1, y1, x2, y2)
+        return False
+        encloseds1 = self.docInnerCanvas.find_overlapping(x1-10, y1, x2-10, y2)
+        encloseds2 = self.docInnerCanvas.find_enclosed(x1-10, y1, x2-10, y2)
         #print(encloseds1, encloseds2, tag)
         for enclosed in encloseds1:
             #print(self.docInnerCanvas.gettags(enclosed), tag in self.docInnerCanvas.gettags(enclosed))
@@ -4078,7 +4336,7 @@ class MainWindow():
                     if(x0b > max(p0x, p1x) or x1b < min(p0x, p1x)):
                         if not (y1b < p1y and y0b > p0y):
                             continue
-                    if(self.altpressed or alt):
+                    if keyboard.is_pressed('alt'):
                         
                         for line in global_settings.infoLaudo[global_settings.pathpdfatual].mapeamento[pagina][block]:
                             
@@ -4192,7 +4450,7 @@ class MainWindow():
                                 continue
                             if(y0l > p1y):
                                 continue                            
-                            if(p0y > y0l and p1y < y1l and not_painted_solo_line):    
+                            if(p0y >= y0l and p1y <= y1l and not_painted_solo_line):    
                                 x0 = min(p0x, p1x)
                                 x1 = max(p0x, p1x)                                
                                 rects = []
@@ -5428,8 +5686,11 @@ class MainWindow():
                             doc = fitz.open(pathpdf2)
                             loadedPage = doc[p]
                             box = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y1)
-                            pix = loadedPage.get_pixmap(alpha=False, matrix=self.mat, clip=box) 
+                            zoom = 2.5
+                            mat = fitz.Matrix(zoom, zoom)
+                            pix = loadedPage.get_pixmap(alpha=False, matrix=mat, clip=box, dpi=1200) 
                             mode = "RGBA" if pix.alpha else "RGB"
+                            
                             imgdata = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
                             pix = None
                             images.append(imgdata)
@@ -5476,16 +5737,25 @@ class MainWindow():
         elif(item in global_settings.searchResultsDict):
             leaves.append(item)
         
-    def addSeveralMarkers(self, idobscat, iteminit):
-        leaves = []
-        self.colectLeavesFromIteminit(self.treeviewSearches, iteminit, leaves)
+    def addSeveralMarkers(self, idobscat, items):
         listadeitenscompleto = global_settings.manager.list()
+        added = set()
         allitens = []
-        for leaf in leaves:
-            pdf = utilities_general.get_normalized_path(global_settings.searchResultsDict[leaf].pathpdf)
-            allitens.append((global_settings.searchResultsDict[leaf], global_settings.infoLaudo[pdf].mt, \
-                             global_settings.infoLaudo[pdf].mb, global_settings.infoLaudo[pdf].me, global_settings.infoLaudo[pdf].md,\
-                                 global_settings.infoLaudo[pdf].pixorgw, global_settings.infoLaudo[pdf].pixorgh, idobscat))
+        for iteminit in items:
+            leaves = []
+            self.colectLeavesFromIteminit(self.treeviewSearches, iteminit, leaves)
+            
+            for leaf in leaves:
+                if(leaf in added):
+                    continue
+                added.add(leaf)
+                #if(global_settings.searchResultsDict[leaf].idtermopdf+str(global_settings.searchResultsDict[leaf].tptoc) in added):
+                #    continue
+                #added.add(global_settings.searchResultsDict[leaf].idtermopdf)
+                pdf = utilities_general.get_normalized_path(global_settings.searchResultsDict[leaf].pathpdf)
+                allitens.append((global_settings.searchResultsDict[leaf], global_settings.infoLaudo[pdf].mt, \
+                                 global_settings.infoLaudo[pdf].mb, global_settings.infoLaudo[pdf].me, global_settings.infoLaudo[pdf].md,\
+                                     global_settings.infoLaudo[pdf].pixorgw, global_settings.infoLaudo[pdf].pixorgh, idobscat))
         addserveralobs = mp.Process(target=process_functions.processBatchInsertObs, args=(listadeitenscompleto, allitens,), daemon=True)
         addserveralobs.start()  
         addingmarkers = tkinter.Toplevel()
@@ -5784,10 +6054,10 @@ class MainWindow():
         children = utilities_general.countChildren(self.treeviewSearches, item, putcount=False)  
         #print(children)
         if(len(items)>1):
-            for item in items:
-                self.addSeveralMarkers(idobscat, item)
+            #for item in items:
+            self.addSeveralMarkers(idobscat, items)
         elif(children>0):# and first):
-            self.addSeveralMarkers(idobscat, item)
+            self.addSeveralMarkers(idobscat, [item])
         else:
             resultsearch = global_settings.searchResultsDict[self.treeviewSearches.identify_row(event.y)]
             pagina = int(resultsearch.pagina)            
@@ -6073,7 +6343,7 @@ class MainWindow():
                 cursor.custom_execute("PRAGMA journal_mode=WAL")
                 annotation_list = {}
                 for link_t in links_tratados:
-                    print(link_t)
+                    #print(link_t)
                     cursor.custom_execute(insert_annot, link_t)
                     idannot = cursor.lastrowid                            
                     paginainit = link_t[2]
@@ -6178,8 +6448,8 @@ class MainWindow():
                     "STATE DEPARTMENT OF PUBLIC SECURITY -- SCIENTIFIC POLICE OF PARANÁ\n\n"+\
                     "  CODED BY by:\nGustavo Borelli Bedendo <gustavo.bedendo@gmail.com>\n\n"+\
                     "  SUPPORTERS :\nAlexandre Vrubel\nRoger Roberto Rocha Duarte\nWellerson Jeremias Colombari\n\n\n\n"+\
-                    "  MAIN TESTERS AND USAGE IDEAS:\nConrado Pinto Rebessi\nJacson Gluzezak\nLaercio Silva de Campos Junior\nMarcus Fabio Fontenelle do Carmo\nRaphael Zago\n"+\
-                    "\n\nApril 2021\n\n"+\
+                    "  MAIN TESTERS AND USAGE IDEAS:\nConrado Pinto Rebessi\nJacson Gluzezak\nJoel Koster\nLaercio Silva de Campos Junior\nMarcus Fabio Fontenelle do Carmo\nRaphael Zago\n"+\
+                    "\n\nJanuary 2024\n\n"+\
                     "It is a work in progress, the code, \ndespite the ugliness and some bugs, is available on:\n"+\
                     "https://github.com/gustavobedendo/FERA"
             
@@ -6216,11 +6486,50 @@ class MainWindow():
     def editadd_anottation(self, iiditem):
         observation = self.allobsbyitem[iiditem]
         classes_general.Annotation_Window(observation, self.allobsbyitem[iiditem].annotations, self)
-            
+
+    
+    def specialCopy(self):
+        pinit = min(global_settings.infoLaudo[global_settings.pathpdfatual].retangulosDesenhados)
+        linha1 = global_settings.infoLaudo[global_settings.pathpdfatual].retangulosDesenhados[pinit]['text'][0][1]
+        linha2 = global_settings.infoLaudo[global_settings.pathpdfatual].retangulosDesenhados[pinit]['text'][-1][1]
+        #print(linha1.x0, linha1.y0, linha2.x1, linha2.y1)
+        pagina = global_settings.docatual[pinit]
+        tabelas = pagina.find_tables(fitz.Rect(0,0,999,999))
+        links = pagina.get_links()
+                        
+        for tabela in tabelas.tables:
+            for linha in tabela.rows:
+                if(linha1.y0 > linha.bbox[1] and linha2.y1 < linha.bbox[3]):
+                    celulas = filter(lambda x: x is not None, linha.cells)
+                    textos = []
+                    for cell in celulas:
+                        textos.append((pagina.get_textbox(cell).replace("\n", " "), cell))
+                    for link in links:
+                        r = link['from']
+                        if('file' not in link):
+                            continue
+                        try:
+                            arquivo  = link['file']
+                            if("#" in arquivo):
+                                continue
+                            pdfatualnorm = utilities_general.get_normalized_path(global_settings.pathpdfatual)
+                            filepath = str(Path(utilities_general.get_normalized_path(os.path.join(Path(utilities_general.get_normalized_path(pdfatualnorm)).parent,arquivo))))
+                            #print(self.get_thumbnail(filepath))
+
+                                
+                        except:
+                            None
+                    #print(textos[0], textos[1], textos[2])
+                        #print()
+                        #print(cell) 
+
     def menuPopup(self, event):
         if(self.areaselectionActive or self.selectionActive):
             self.menu = tkinter.Menu(global_settings.root, tearoff=0)
             self.menu.add_command(label="Copiar", command=self.copiar)
+            self.menucats_copy = tkinter.Menu(self.menu, tearoff=0)
+            self.menucats_copy.add_command(label="Linha do Tempo (mobileMerger)", command= lambda : self.specialCopy())
+            self.menu.add_cascade(label="Copiar Especial (RTF)", menu=self.menucats_copy)
             self.menu.add_command(label="Export arquivos em intervalo", command= lambda : self.exportInterval())
             self.menu.add_separator()           
             getobscatas =  self.treeviewObs.get_children('')
@@ -6312,8 +6621,8 @@ class MainWindow():
             self.docInnerCanvas.bind('<Next>', lambda event: self.manipulatePagesByClick('next', event))
             self.docInnerCanvas.bind('<Home>', lambda event: self.manipulatePagesByClick('first', event))
             self.docInnerCanvas.bind('<End>', lambda event: self.manipulatePagesByClick('last', event))
-            self.docInnerCanvas.bind('<KeyPress-Alt_L>', self.altPressed)
-            self.docInnerCanvas.bind('<KeyRelease-Alt_L>', self.altRelease)
+            #self.docInnerCanvas.bind('<KeyPress-Alt_L>', self.altPressed)
+            #self.docInnerCanvas.bind('<KeyRelease-Alt_L>', self.altRelease)
             global_settings.root.bind('<Tab>', self.altRelease2)
             self.docInnerCanvas.bind("<Motion>", self.checkLink)
             self.docInnerCanvas.bind("<Control-MouseWheel>", self.scrollzoom)
@@ -6441,7 +6750,7 @@ class MainWindow():
                 newpath = utilities_general.get_normalized_path(self.positions[temp][0])
                 novoscroll = self.positions[temp][1]
                 self.positions[self.indiceposition] = (global_settings.pathpdfatual, self.vscrollbar.get()[0])
-                print(global_settings.pathpdfatual, self.positions[temp])
+                #print(global_settings.pathpdfatual, self.positions[temp])
                 if(global_settings.pathpdfatual!=newpath):
                     pdfantigo = global_settings.pathpdfatual
                     for i in range(global_settings.minMaxLabels):
@@ -6492,12 +6801,12 @@ class MainWindow():
             utilities_general.printlogexception(ex=ex)
     
     def altRelease2(self, event):
-        print("RELEASE")
+        #print("RELEASE")
         if(self.altpressed):
             self.altpressed=False
     
     def altRelease(self, event):
-        print("RELEASE")
+        #print("RELEASE")
         self.altpressed=False
     
     def altPressed(self, event):
@@ -6511,113 +6820,6 @@ class MainWindow():
 
  
 
-def start_up_app():
-    
-    
-    sqliteconn = None
-    try:
-        if(len(sys.argv) == 1): 
-            indexador_fera.import_create_toplevel()            
-            if(global_settings.pathdb == None):
-                return  
-            else:
-                sys.argv.append(str(global_settings.pathdb))
-        global_settings.splash_window = classes_general.Splash_window(global_settings.root)
-        if(len(sys.argv) >= 2): 
-            filename, extension = os.path.splitext(sys.argv[1])
-            if(".pdf" == extension.lower()):
-                pathp = sys.argv[1]
-                global_settings.pathdb = Path(os.path.abspath(sys.argv[1])+".db")  
-                sqliteconn = None
-                tocommit = False
-                if(not os.path.exists(global_settings.pathdb)):
-                    
-                    #print(1)
-                    notindexed = []
-                    notindexed.append(pathp)
-                    global_settings.splash_window.window.deiconify()
-                    global_settings.splash_window.label['text'] = "Criando banco de dados..."
-                    global_settings.splash_window.label.update_idletasks()
-                    indexador_fera.createNewDbFile(global_settings.root)   
-                    sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
-                    global_settings.splash_window.label['text'] = "Aguardando definição de margens..."
-                    global_settings.splash_window.label.update_idletasks()
-                    tupleinfo = indexador_fera.addrels('relatorio', view=None, pathpdfinput = notindexed, \
-                                                       pathdbext=global_settings.pathdb, rootx=global_settings.root, sqliteconnx=sqliteconn)
-                    global_settings.splash_window.label['text'] = "Carregando ferramenta..."
-                    global_settings.splash_window.label.update_idletasks()
-                else:
-                    sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
-                    #print(2)
-                    cursor = sqliteconn.cursor()
-                    if(os.path.exists(str(global_settings.pathdb)+'.lock')):
-                        window = utilities_general.popup_window(sair=True, texto = \
-                                    "O banco de dados aparentemente está aberto em outra execução!\nO programa irá encerrar para evitar inconsistências.\n"+\
-                                     "Para corrigir esse problema:\nVerifique outras execuções utilizando o mesmo banco de dados\n ou \nApague o arquivo <{}>".\
-                                         format(str(global_settings.pathdb)+'.lock'))
-                        global_settings.root.wait_window(window)                                            
-                    indexador_fera.validate_annotation(sqliteconn, cursor)
-                    must_validate = indexador_fera.necessity_to_validate(cursor)
-                    
-                    if(must_validate):
-                        tocommit = indexador_fera.validate_new_db_columns(cursor, must_validate)
-                        indexador_fera.update_db_version(sqliteconn, cursor)
-                    notindexed = []
-                    select_all_pdfs = '''SELECT  P.id_pdf, P.indexado, P.rel_path_pdf FROM 
-                    Anexo_Eletronico_Pdfs P 
-                    '''
-                    try:
-                        cursor.custom_execute(select_all_pdfs, None, True, False)
-                        relats = cursor.fetchall()
-                        notindexed.append(pathp)
-                        for rel in relats:                                   
-                            notindexed.append(os.path.join(global_settings.pathdb.parent, rel[2]))
-                        if(len(notindexed)>0): 
-                            tupleinfo = indexador_fera.addrels('relatorio', pathpdfinput = notindexed, pathdbext=sys.argv[1], \
-                                                                   rootx=global_settings.root, sqliteconnx=sqliteconn)
-                    except sqlite3.OperationalError as ex:  
-                        notindexed.append(pathp)
-                        try:
-                            sqliteconn.close()
-                        except:
-                            None
-                        indexador_fera.createNewDbFile(global_settings.root) 
-                        sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))                           
-                        tupleinfo = indexador_fera.addrels('relatorio', pathpdfinput = notindexed, pathdbext=sys.argv[1], rootx=global_settings.root, sqliteconnx=sqliteconn)                            
-                        indexing = True
-                #indexador_fera.gather_information_fromdb()
-                if(tocommit):
-                    sqliteconn.commit()
-                utilities_general.initiate_indexing_thread()
-                global_settings.initiate_processes()
-                start_time = time.time()
-                start_fera_app() 
-            elif(".db" == extension.lower()):
-                global_settings.pathdb = Path(sys.argv[1])    
-                gotoviewer = False
-                if(len(sys.argv) >= 3 and sys.argv[2]=='1'):
-                    gotoviewer = True  
-                sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
-                
-                indexador_fera.gather_information_fromdb(sqliteconn)
-                sqliteconn.close()
-                utilities_general.initiate_indexing_thread()
-                if(not gotoviewer):
-                    global_settings.splash_window.window.withdraw()
-                    indexador_fera.App(global_settings.version, gotoviewer)
-                if(global_settings.pathdb==None):
-                    return
-                global_settings.initiate_processes()
-                start_fera_app()  
-        else:
-            print(1)
-    except Exception as ex:
-        utilities_general.printlogexception(ex=ex)
-    finally:
-        try:
-            sqliteconn.close()
-        except:
-            None
 
 
 
@@ -6690,105 +6892,9 @@ def start_fera_app():
         except:
             None
             
-def build_db_with_reports_commandline(pathdb=None, reports=None):
-    def cleanup_previous_reports(relpathdir):
-        sqliteconn = utilities_general.connectDB(str(pathdb), 5)
-        status = False
-        try:
-            cursor = sqliteconn.cursor()
-            comando = "SELECT  P.id_pdf, P.indexado, P.rel_path_pdf FROM Anexo_Eletronico_Pdfs P where P.rel_path_pdf like :termo"
-            print(comando)
-            cursor.custom_execute(comando, {'termo':'%'+relpathdir+'%'})
-            previouspdfs = cursor.fetchall()
-            for p_pdfs in previouspdfs:
-                idpdf = p_pdfs[0]
-                print(idpdf)
-                cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf), None, False, False)
-                #cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_config", None, False, False)
-                #cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_content", None, False, False)
-                #cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_data", None, False, False)
-                #cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_docsize", None, False, False)
-                #cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_idx", None, False, False)
-                cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Images_id_pdf_"+str(idpdf), None, False, False)
-                cursor.custom_execute("DELETE FROM Anexo_Eletronico_SearchResults where id_pdf = ?", (idpdf,))
-                
-                check_previous_search =  "SELECT DISTINCT C.termo, C.tipobusca, C.id_termo, C.fixo, C.pesquisado  FROM Anexo_Eletronico_SearchTerms C ORDER by 3"
-                cursor.custom_execute(check_previous_search)
-                termosbuscados = cursor.fetchall()
-                for termo in termosbuscados:
-                    id_termo = termo[2]
-                    pesquisados = termo[4].replace("({})".format(idpdf),'')
-                    updateinto2 = "UPDATE Anexo_Eletronico_SearchTerms set pesquisado = ? WHERE id_termo = ?"
-                    cursor.custom_execute(updateinto2, (pesquisados, id_termo))
 
-                cursor.custom_execute("DELETE FROM Anexo_Eletronico_Pdfs where id_pdf = ?", (idpdf,))    
-            sqliteconn.commit()
-            status = True
-            
-        except:
-            status = False
-        finally:
-            if(sqliteconn):
-                sqliteconn.close()
-            return status
-         
-    status = 0
-    try:
-        createdb = False
-        global_settings.pathdb = Path(pathdb)
-        if(not os.path.exists(global_settings.pathdb)):
-            createdb = indexador_fera.createNewDbFile(None, None)
-        else:
-            createdb = True
-        
-        if(not createdb):
-            print(f"Fail to create DB on {pathdb}")
-            raise Exception()
-        relpathdir = os.path.relpath(os.path.dirname(reports[0]), global_settings.pathdb.parent)
-        if(cleanup_previous_reports(relpathdir)):
-            for report in reports:
-                print(f"Indexing {report} -->")
-                addrel  = indexador_fera.addrel_commandLine(report)
-                if(addrel):
-                    print(f"Indexing {report} --> OK")
-                else:
-                    status = 1
-                    print(f"Indexing {report} --> FAIL")
-    except:
-        traceback.print_exc()
-        status = 1
-    finally:
-        return status
     
         
 
-if __name__ == '__main__':  
-    try:        
-        mp.freeze_support()    
-        commandline = False
-        long_options = ["commandline", "relatorio=", "pathdb="]
-        argumentList = sys.argv[1:]
-        arguments, values = getopt.getopt(argumentList, [], long_options)
-        pathdb = None
-        reports = []
-        for currentArgument, currentValue in arguments:
-            if currentArgument in ("--commandline"):
-                commandline = True
-            if currentArgument in ("--pathdb"):
-                pathdb = str(currentValue)
-            if currentArgument in ("--relatorio"):
-                reports.append(currentValue)
-        if(commandline):
-            if(reports==None or pathdb==None):
-                print(f"Erro pathdb: {pathdb} - reports: {reports}")
-                sys.exit(1)
-            global_settings.initiate_variables(commandline)
-            status = build_db_with_reports_commandline(pathdb, reports)
-            sys.exit(status)
-        else:
-            global_settings.initiate_variables()
-            setproctitle.setproctitle("FERA "+global_settings.version+" - Forensics Evidence Report Analyzer -- Polícia Científica do Paraná")
-            start_up_app()
-    except Exception as ex:
-        utilities_general.printlogexception(ex=ex)
+
 
