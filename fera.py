@@ -475,7 +475,7 @@ class MainWindow():
         
     def getlastPos(self):
         global_settings.infoLaudo[global_settings.pathpdfatual].ultimaPosicao=(self.vscrollbar.get()[0])
-        global_settings.root.after(1000, self.getlastPos)
+        global_settings.root.after(4000, self.getlastPos)
         
 
     def process_links(self, links, pagina, pdfatualnorm):
@@ -547,7 +547,7 @@ class MainWindow():
         except:
             None
         finally:
-            global_settings.root.after(1000, self.check_errors)
+            global_settings.root.after(3000, self.check_errors)
             
     def cleanup(self):
         try:
@@ -561,7 +561,7 @@ class MainWindow():
         except Exception as ex:
             utilities_general.printlogexception(ex=ex)
         finally:
-            global_settings.root.after(10000, self.cleanup)
+            global_settings.root.after(60000, self.cleanup)
     
     def previousSearchSelected(self, event=None):
         self.previousSearchesWindow.withdraw()
@@ -785,6 +785,8 @@ class MainWindow():
                 global_settings.root.after(10, self.checkUpdates)
                 
     def treeSeachAfter(self):
+        resultsearch = None
+        intervalo = 300
         try:
             contagem = 0
             starttime = time.process_time_ns()
@@ -796,6 +798,7 @@ class MainWindow():
                         contagem +=1
                         res = global_settings.result_queue.get()
                         #adicionado a llista de buscas
+                        intervalo = 20
                         if(res[0]==0):
                             resultsearch = res[1]
                             idtermo = resultsearch.idtermo
@@ -902,8 +905,11 @@ class MainWindow():
                 endtime = time.process_time_ns()
         except:
             None
-        finally:            
-            global_settings.root.after(30, self.treeSeachAfter)   
+        finally:    
+            #if(resultsearch!=None):        
+            global_settings.root.after(intervalo, self.treeSeachAfter)   
+            #else:
+            #    global_settings.root.after(300, self.treeSeachAfter)
           
     def checkPages(self):
         try:
@@ -1950,7 +1956,7 @@ class MainWindow():
                     estaselecao += '{\\rtlch\\ltrch\\loch\\fs20\\li72\\f2\\i{'+observation.conteudo.encode('rtfunicode').decode('ascii') + '}\\line}'
                 valoresPecial = self.treeviewObs.item(item, 'values')
                 pagi = int(valoresPecial[2].strip())+1
-                estaselecao+=f"(...)\\line"
+                estaselecao+=f"\\f2(...)\\line"
                 
                 
                 if(pathdocespecial!=observation.pathpdf):
@@ -2025,9 +2031,16 @@ class MainWindow():
             p1xinit = observation.p1x
             p1yinit = observation.p1y-2   
             if(tiposelecao=='texto'):
-                textoselecao += f"\\line(...) (Fls. {observation.paginainit+1})"
+                if(textoselecao.endswith("(...)\\line")):
+                    textoselecao += f"(Fls. {observation.paginainit+1})\\line"
+                else:
+                    textoselecao += f"\\line\\f2(...) (Fls. {observation.paginainit+1})\\line"
             else:
-                textoselecao += f"\\line(Fls. {observation.paginainit+1})"
+                if(textoselecao.endswith("(...)\\line")):
+                    textoselecao += f"\\f2(Fls. {observation.paginainit+1})\\line"
+                else:
+                    textoselecao += f"\\line\\f2(Fls. {observation.paginainit+1})\\line"
+            
             textonatabela, textoselecao = self.ObstoRTf(iid, docespecial, pathdocespecial1, \
                                                         tiposelecao, pinit, pfim, p0xinit, p0yinit, \
                                                             p1xinit, p1yinit, estaselecao=textoselecao, pmin=pinit2, pmax = pfim2, withnote=withnotes)
@@ -2337,8 +2350,8 @@ class MainWindow():
                             docpagina = "{{\\fs22\\f2{{ Relat}}\\\'F3rio \\\'22{}\\\'22 -- Fls. {}}}".format(docname, pagina+1)   
                         
                         #docpagina = "{{\\fs22\\f2{{ Relat}}\\\'F3rio \\\'22{}\\\'22 -- Fls. {}}}".format(docname, pagi)
-                        textonatabela += ("\\par\\trowd\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\trautofit1\\intbl\\clftsWidth3\\clwWidth9070\\cellx9070{{\\cbpat2\\qc\\loch\\i\\b\\fs22\\f2 TABELA }}{{\\qc\\field{{\\fldinst  SEQ Tabela \\\\* ARABIC }}}}"+\
-                        "{{\\qc:\\i{}}}\\cell\\row"+\
+                        textonatabela += ("\\par\\trowd\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\trautofit1\\intbl\\clftsWidth3\\clwWidth9070\\cellx9070{{\\cbpat2\\qc\\loch\\i\\b\\fs22\\f2 TABELA }}{{\\hich\\af2\\af2\\loch\\f2\\f2\\loch\\field{{\\*\\fldinst{{SEQ Tabela\\\\* ARABIC }}}}{{\\fldrslt{{ }}}}}}"+\
+                        "{{\\f2\\qc:\\i\\f2{}}}\\f2\\cell\\row"+\
                             # "\\trowd\\clftsWidth1\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\cellx1\\intbl{{\\cbpat2\\qc\\loch\\b{{TABELA}}}}\\cell\\row"+\
                             "\\par\\trowd\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\trautofit1\\intbl\\clftsWidth3\\clwWidth9070\\cellx9070 {}\\cell\\row\\pard\\line").format(docpagina, estaselecao) + "\n"
                         return (textonatabela, estaselecao)
@@ -2578,15 +2591,16 @@ class MainWindow():
                                         #break
 
                  pagi = pagina+1
-                 estaselecao = estaselecao+f"(...)\\line"           
+                 if(estaselecao!=""):
+                    estaselecao = estaselecao+f"\\f2(...)\\line"           
                  docname = os.path.basename(pathdocespecial)
                  if(pmin!=None and pmax!=None and pmin!=pmax):
                      docpagina = "{{\\fs22\\f2{{ Relat}}\\\'F3rio \\\'22{}\\\'22 -- Fls. {} a {}}}".format(docname, pmin+1, pmax+1)
                  else:
                      docpagina = "{{\\fs22\\f2{{ Relat}}\\\'F3rio \\\'22{}\\\'22 -- Fls. {}}}".format(docname, pagina+1)   
                  
-                 textonatabela += ("\\par\\trowd\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\trautofit1\\intbl\\clftsWidth3\\clwWidth9070\\cellx9070{{\\cbpat2\\qc\\loch\\i\\b\\fs22\\f2 TABELA }}{{\\qc\\field{{\\fldinst  SEQ Tabela \\\\* ARABIC }}}}"+\
-                 "{{\\qc:\\i{}}}\\cell\\row"+\
+                 textonatabela += ("\\par\\trowd\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\trautofit1\\intbl\\clftsWidth3\\clwWidth9070\\cellx9070{{\\cbpat2\\qc\\loch\\i\\b\\fs22\\f2 TABELA }}{{\\hich\\af2\\af2\\loch\\f2\\f2\\loch\\field\\flddirty{{\\*\\fldinst{{SEQ Tabela\\\\* ARABIC }}}}{{\\fldrslt{{ }}}}}}"+\
+                 "{{\\f2\\qc:\\i\\f2{}}}\\f2\\cell\\row"+\
                     # "\\trowd\\clftsWidth1\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\cellx1\\intbl{{\\cbpat2\\qc\\loch\\b{{TABELA}}}}\\cell\\row"+\
                      "\\par\\trowd\\clbrdrb\\brdrs\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrr\\brdrs\\trautofit1\\intbl\\clftsWidth3\\clwWidth9070\\cellx9070 {}\\cell\\row\\pard\\line").format(docpagina, estaselecao) + "\n"
                  return (textonatabela, estaselecao)
@@ -6787,7 +6801,7 @@ class MainWindow():
                 #
                 pagina = round(novoscroll*global_settings.infoLaudo[global_settings.pathpdfatual].len)
                 
-                global_settings.root.after(1, lambda: self.docInnerCanvas.yview_moveto(novoscroll))
+                global_settings.root.after(10, lambda: self.docInnerCanvas.yview_moveto(novoscroll))
                 self.docInnerCanvas.yview_moveto(novoscroll)
                 if(str(pagina+1)!=self.pagVar.get()):
                     self.pagVar.set(str(pagina+1))
