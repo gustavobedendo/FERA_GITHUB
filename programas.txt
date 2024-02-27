@@ -1,0 +1,7 @@
+C:\Program Files\7-Zip\7zFM.exe;7-Zip
+C:\Program Files\Adobe\Acrobat DC\Acrobat;Adobe Reader
+C:\Program Files\Just Great Software\EditPad Lite 7\EditPadLite7.exe;EditPad Lite
+C:\Program Files\HxD\HxD.exe;HxD 
+C:\Program Files\Notepad++;Notepad++
+
+B:/SQLiteDatabaseBrowserPortable/SQLiteDatabaseBrowserPortable.exe;

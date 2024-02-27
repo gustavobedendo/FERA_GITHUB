@@ -1,10 +1,10 @@
 block_cipher = None
 
 
-a = Analysis(['fera.py'],
+a = Analysis(['fera_full.py'],
              pathex=['B:\\VISUALIZADOR\\FERA'],
              binaries=[],
-             datas=[('./Imagens/fts4tutorial.png', '.'), ('./ListasDeBusca/*', './ListasDeBusca'), ('./Imagens/logoMini.ico', '.')],
+             datas=[('./Imagens/fts4tutorial.png', '.'), ('./ListasDeBusca/*', './ListasDeBusca'), ('./Imagens/logoMini.ico', '.'), ('ffmpeg.exe','.')],
              hiddenimports=['PIL', 'PIL._imagingtk', 'PIL._tkinter_finder'],
              hookspath=[],
              runtime_hooks=[],
@@ -32,4 +32,4 @@ coll = COLLECT(exe,
                strip=False,
                upx=True,
                upx_exclude=[],
-               name='fera')
+               name='fera_full')
