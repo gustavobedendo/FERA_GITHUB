@@ -4,3 +4,4 @@ dist/
 include/
 lib/
 *.zip
+dist.7z

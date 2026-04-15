@@ -1,2 +1,1 @@
-D:\112253-23-Anexo\FERA\fera-112253-23.db
-C:\Users\labinfo\Desktop\Teste\teste.db
+\\192.168.10.142\Processados\Processados\82146-24\Validador\FERA\FERA\fera-82146-24.db

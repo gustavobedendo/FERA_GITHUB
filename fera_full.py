@@ -7,10 +7,13 @@ Created on Fri Jun 23 17:07:07 2023
 """
 #codereview
 import multiprocessing as mp
-import sys, getopt, global_settings, indexador_fera, setproctitle, fera, utilities_general, global_settings, classes_general
+import sys, getopt, global_settings, indexador_fera, fera, utilities_general, global_settings, classes_general
 import os,sqlite3, time, shutil
 from pathlib import Path
-import traceback
+import traceback, threading
+
+
+gotoviewer = False
 
 
 def start_up_app():
@@ -97,27 +100,43 @@ def start_up_app():
                 gotoviewer = False
                 if(len(sys.argv) >= 3 and sys.argv[2]=='1'):
                     gotoviewer = True  
-                sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
+                #print('waiting3')
+                global_settings.splash_window.window.attributes("-alpha", 255)
+                try:
+                    None
+                    global_settings.splash_window.window.wm_attributes("-alpha", 255)
+                except:
+                    None 
                 
-                utilities_general.gather_information_fromdb(sqliteconn)
-                sqliteconn.close()
-                utilities_general.initiate_indexing_thread()
-                if(not gotoviewer):
-                    global_settings.splash_window.window.withdraw()
-                    indexador_fera.App(global_settings.version, gotoviewer)
-                if(global_settings.pathdb==None):
-                    return
-                global_settings.initiate_processes()
-                fera.start_fera_app()  
+                thread = threading.Thread(target=utilities_general.gather_information_fromdb)
+                thread.start()
+                global_settings.root.after(5, wait_to_open)
+                global_settings.root.mainloop()
+                
         else:
             print(1)
     except Exception as ex:
         utilities_general.printlogexception(ex=ex)
     finally:
         try:
-            sqliteconn.close()
+            if(sqliteconn):
+                sqliteconn.close()
         except:
             None
+            
+def wait_to_open():
+    if(global_settings.finished_gathering_info):
+        if(not gotoviewer):
+            global_settings.splash_window.window.withdraw()
+            indexador_fera.App(global_settings.version, gotoviewer)
+        if(global_settings.pathdb==None):
+            return
+        global_settings.initiate_processes()
+        fera.start_fera_app()  
+    else:
+        global_settings.splash_window.label['text'] = global_settings.texto_splash
+        global_settings.root.update_idletasks()
+        global_settings.root.after(5, wait_to_open)
 
 def find_reports_shortcut(path):
     pdfs = []
@@ -131,7 +150,7 @@ if __name__ == '__main__':
     try:        
         mp.freeze_support()    
         commandline = False
-        long_options = ["commandline", "relatorio=", "pathdb=", "shortcut"]
+        long_options = ["commandline", "relatorio=", "pathdb=", "shortcut", "indexinfo="]
         argumentList = sys.argv[1:]
         arguments, values = getopt.getopt(argumentList, [], long_options)
         pathdb = None
@@ -155,6 +174,15 @@ if __name__ == '__main__':
                 pathdb = str(currentValue)
             if currentArgument in ("--relatorio"):
                 reports.append(currentValue)
+            if currentArgument in ("--indexinfo"):
+                eqrelatoriosplit = currentValue.split(";")
+                reports.append(indexador_fera.IndexInfo(eqrelatoriosplit[0], 
+                                                        eqrelatoriosplit[1], 
+                                                        eqrelatoriosplit[2],
+                                                        eqrelatoriosplit[3:]))
+                
+                
+                
         if(commandline):
             if(reports==None or pathdb==None):
                 print(f"Erro pathdb: {pathdb} - reports: {reports}")
@@ -178,7 +206,6 @@ if __name__ == '__main__':
             
         else:
             global_settings.initiate_variables()
-            setproctitle.setproctitle("FERA "+global_settings.version+" - Forensics Evidence Report Analyzer -- Polícia Científica do Paraná")
             start_up_app()
     except Exception as ex:
         if(commandline):

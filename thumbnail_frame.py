@@ -10,7 +10,7 @@ def fetch_images_from_db(db_path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    cursor.execute("SELECT path, img_blob FROM thumbnails")
+    cursor.execute("SELECT path, img_blob FROM thumbnails LIMIT 50")
     rows = cursor.fetchall()
     
     images_info = []
@@ -242,7 +242,7 @@ class ThumbnailGallery(tk.Tk):
 
 if __name__ == "__main__":
     # Example usage with SQLite database path
-    db_path = r"D:\50820-24-Anexo\Anexo\Eq01\sources\ferathumbs.db"
+    db_path = r"D:\28875-23-Anexo\Anexo\Eq01\sources\ferathumbs.db"
     images_info = fetch_images_from_db(db_path)
 
     app = ThumbnailGallery(images_info)

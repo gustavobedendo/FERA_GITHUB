@@ -60,7 +60,7 @@ class Custom_Cursor(sqlite3.Cursor):
                 execute_thread = threading.Thread(target=self.execute_with_timeout, args=(command, arguments,), daemon=True)
                 execute_thread.start()
                 execute_thread.join(timeout)
-                if(execute_thread.isAlive()):
+                if(execute_thread.is_alive()):
                     #erros_queue.put(('2', 'traceback.format_exc'))
                     raise TimeLimitExecuteException()
                 
@@ -87,7 +87,7 @@ class Custom_Cursor(sqlite3.Cursor):
                 execute_thread = threading.Thread(target=self.execute_with_timeout, args=(command, arguments,), daemon=True)
                 execute_thread.start()
                 execute_thread.join(timeout)
-                if(execute_thread.isAlive()):
+                if(execute_thread.is_alive()):
                     raise TimeLimitExecuteException()
             elif(arguments==None):
                 self.executemany(command)
@@ -1071,7 +1071,7 @@ class PedidoInQueue():
 
 @total_ordering
 class ResultSearch():
-    def __init__(self):
+    def __init__(self, fonte='relatorio'):
         self.idtermopdf = None
         self.idtermo = None
         self.idpdf = None
@@ -1091,6 +1091,8 @@ class ResultSearch():
         self.tptoc = None
         self.prior= None
         self.end= False
+        self.fonte = fonte
+        self.link_position = None
     def __eq__(self, other):
        if(self.prior == other.prior):
            if(self.idpdf == other.idpdf):
@@ -1127,7 +1129,7 @@ class Rect():
         self.char = []        
 
 class RelatorioSuccint:
-    def __init__(self, idpdf, toc, lenpdf, pixorgw, pixorgh, mt, mb, me, md, paginasindexadas, rel_path_pdf, abs_path_pdf, tipo):
+    def __init__(self, idpdf, toc, lenpdf, pixorgw, pixorgh, mt, mb, me, md, paginasindexadas, rel_path_pdf, abs_path_pdf, tipo, parent_alias):
         self.idpdf = idpdf
         self.tocpdf = global_settings.manager.list(toc)
         self.lenpdf = lenpdf
@@ -1142,6 +1144,7 @@ class RelatorioSuccint:
         self.abs_path_pdf = abs_path_pdf 
         self.tipo = tipo
         self.continuar_a_indexar = True
+        self.parent_alias = parent_alias
 
 class Relatorio():
     def __init__(self):
@@ -1605,12 +1608,12 @@ class querySqlWindow():
         #self.e.grid(row=1, column=0, columnspan=2, sticky='nsew', pady=5)
         application_path = utilities_general.get_application_path()
         try:
-            fts5tut = os.path.join(application_path,"fts4tutorial.png")
+            fts5tut = os.path.join(application_path, "Imagens","fts4tutorial.png")
             self.imgtutorial = ImageTk.PhotoImage(file=fts5tut)
             self.tutorial = tkinter.Label(top, image=self.imgtutorial)
             self.tutorial.grid(row=2, column=0, sticky='nsew', columnspan=2, pady=5)
         except Exception as ex:
-            fts5tut = os.path.join(os.getcwd(),"fts4tutorial.png")
+            fts5tut = os.path.join(os.getcwd(), "Imagens","fts4tutorial.png")
             self.imgtutorial = ImageTk.PhotoImage(file=fts5tut)
             self.tutorial = tkinter.Label(top, image=self.imgtutorial)
             self.tutorial.grid(row=2, column=0, sticky='nsew', columnspan=2, pady=5)

@@ -21,6 +21,15 @@ import multiprocessing as mp
 from threading import Thread
 import time, sys
 import traceback
+from dataclasses import dataclass
+
+@dataclass
+class IndexInfo:
+    """Class for keeping track of an item in inventory."""
+    equipment: str
+    filelist: str
+    indexcontent: str
+    reports: list
 
 
 plt = platform.system()
@@ -73,6 +82,7 @@ def build_db_with_reports_commandline(pathdb=None, reports=None):
             status = True
             
         except:
+            traceback.print_exc()
             status = False
         finally:
             if(sqliteconn):
@@ -94,13 +104,24 @@ def build_db_with_reports_commandline(pathdb=None, reports=None):
         relpathdir = os.path.relpath(os.path.dirname(reports[0]), global_settings.pathdb.parent)
         if(cleanup_previous_reports(relpathdir)):
             for report in reports:
-                print(f"Indexing {report} -->")
-                addrel  = addrel_commandLine(report)
-                if(addrel):
-                    print(f"Indexing {report} --> OK")
-                else:
-                    status = 1
-                    print(f"Indexing {report} --> FAIL")
+                if(isinstance(report, str)):
+                    print(f"Indexing {report} -->")
+                    addrel  = addrel_commandLine(report)
+                    if(addrel):
+                        print(f"Indexing {report} --> OK")
+                    else:
+                        status = 1
+                        print(f"Indexing {report} --> FAIL")
+                elif(isinstance(report, IndexInfo)):
+                    for relatorio in report.reports:
+                        print(f"Indexing including content {relatorio} -->")
+                        addrel  = addrel_commandLine(relatorio, report)
+                        if(addrel):
+                            print(f"Indexing including content {relatorio} --> OK")
+                        else:
+                            status = 1
+                            print(f"Indexing including content {relatorio} --> FAIL")
+                    
     except:
         traceback.print_exc()
         status = 1
@@ -317,6 +338,7 @@ class App():
                             utilities_general.printlogexception(ex=ex)
                         
                         pathpdf = utilities_general.get_normalized_path(pathpdf_new)
+                        parent_alias = utilities_general.get_eq_base(pathpdf)
                         #class RelatorioSuccint:
                         #    def __init__(self, idpdf, toc, lenpdf, pixorgw, pixorgh, mt, mb, me, md, paginasindexadas, rel_path_pdf, abs_path_pdf, tipo):
                         relatorio_proxy = classes_general.RelatorioSuccint(values[0], global_settings.infoLaudo[pathpdf_old].toc,\
@@ -328,7 +350,8 @@ class App():
                                                                            global_settings.infoLaudo[pathpdf_old].me,\
                                                                            global_settings.infoLaudo[pathpdf_old].md,\
                                                                            global_settings.infoLaudo[pathpdf_old].len,\
-                                                                           relpathpdf, pathpdf, global_settings.infoLaudo[pathpdf_old].tipo)
+                                                                           relpathpdf, pathpdf, global_settings.infoLaudo[pathpdf_old].tipo,\
+                                                                            parent_alias)
                                                                                                              
                         global_settings.infoLaudo[pathpdf]=global_settings.infoLaudo[pathpdf_old]
                         global_settings.listaRELS[pathpdf]=relatorio_proxy
@@ -370,7 +393,7 @@ class App():
                                 mmtopxbottom = math.ceil(pixorg.height-(document_margin.mb/25.4*72))
                                 mmtopxleft = math.floor(document_margin.me/25.4*72)
                                 mmtopxright = math.ceil(pixorg.width-(document_margin.md/25.4*72))
-                                
+                                parent_alias = utilities_general.get_eq_base(pathpdf_new)
                                 global_settings.infoLaudo[pathpdf_new] = classes_general.Relatorio() 
                                 global_settings.infoLaudo[pathpdf_new].mt = document_margin.mt
                                 global_settings.infoLaudo[pathpdf_new].mb = document_margin.mb
@@ -385,6 +408,7 @@ class App():
                                 global_settings.infoLaudo[pathpdf_new].paginasindexadas = 0
                                 global_settings.infoLaudo[pathpdf_new].pixorgw = pixorg.width
                                 global_settings.infoLaudo[pathpdf_new].pixorgh = pixorg.height
+                                global_settings.infoLaudo[pathpdf_new].parent_alias = parent_alias
                                 #T.toc_unit, T.pagina, T.deslocy, T.init
                                 nameddests = {}
                                 try:
@@ -433,10 +457,12 @@ class App():
                                 global_settings.infoLaudo[pathpdf_new].zoom_pos = global_settings.infoLaudo[pathpdf_old].zoom_pos
                                 #class RelatorioSuccint:
                                 #    def __init__(self, idpdf, toc, lenpdf, pixorgw, pixorgh, mt, mb, me, md, paginasindexadas, rel_path_pdf, abs_path_pdf, tipo):
+                                parent_alias = utilities_general.get_eq_base(pathpdf_new)
                                 relatorio_proxy = classes_general.RelatorioSuccint(idpdf, global_settings.infoLaudo[pathpdf_new].toc, global_settings.infoLaudo[pathpdf_new].len, \
                                                                                    pixorg.width, pixorg.height, document_margin.mt, document_margin.mb, document_margin.me, \
                                                                                        document_margin.md, 0, \
-                                                                                       relpathpdf, pathpdf_new, global_settings.infoLaudo[pathpdf_old].tipo)   
+                                                                                       relpathpdf, pathpdf_new, global_settings.infoLaudo[pathpdf_old].tipo,\
+                                                                                       parent_alias)   
                                 global_settings.listaRELS[pathpdf_new] = relatorio_proxy
                                 if(pathpdf_old!=pathpdf_new):
                                     del global_settings.infoLaudo[pathpdf_old]
@@ -557,6 +583,12 @@ class App():
                     values = self.dirs.item(idpdfitem, 'values')
                     #idpdf,"100%",'OK', tipo, relatorio
                     self.dirs.item(idpdfitem, values=(idpdf,"100%","Image_match {}".format(percentage),values[3],values[4]))
+                elif(proc[0]=='indexando links - hashes'):
+                    idpdf = proc[1]
+                    idpdfitem = 'idpdf'+str(idpdf)
+                    values = self.dirs.item(idpdfitem, 'values')
+                    #idpdf,"100%",'OK', tipo, relatorio
+                    self.dirs.item(idpdfitem, values=(idpdf,"Indexando Links/Hashes",proc[2], values[3], values[4]))
 
         except Exception as ex:
             utilities_general.printlogexception(ex=ex)
@@ -804,7 +836,9 @@ def grabNamedDestinations(doc):
     key = doc.xref_get_key(doc.pdf_catalog(), "Names")
     lista = {}
     try:
-        dests = doc.xref_get_key(int(key[1].split(" ")[0]), "Dests")
+        chave = key[1].split(" ")[0]
+        if(chave == "null"): return
+        dests = doc.xref_get_key(int(chave), "Dests")
         #print(dests)
         if("xref" in key[0]):
             iterateXREF_NamedDests(doc, int(dests[1].split(" ")[0]),pismm, p3, p4, pnotmm, xreftopage, lista)
@@ -843,7 +877,7 @@ def disable_event():
     pass
 
 
-def addrel_commandLine(patpdf):
+def addrel_commandLine(patpdf, indexinfo : IndexInfo = None):
     goon = True
     def update_indexing_status():
         print()
@@ -899,9 +933,9 @@ def addrel_commandLine(patpdf):
         doclen = len(doc)
         #doc.close()
         pdf = (patpdf, global_settings.default_margin_top, global_settings.default_margin_bottom, \
-               global_settings.default_margin_left, global_settings.default_margin_right, pixorg, doclen, '', 0)
+               global_settings.default_margin_left, global_settings.default_margin_right, pixorg, doclen, utilities_general.get_eq_base(patpdf), 0)
             
-            
+        
         mt = pdf[1]
         mb = pdf[2]
         me = pdf[3]
@@ -916,7 +950,10 @@ def addrel_commandLine(patpdf):
             tipo = 'relatorio'
             cursor = sqliteconn.cursor()
             print(f"Inserting {patpdf} to DB -->")
-            cursor.custom_execute(insert_query_pdf, (relpathpdf, 0,tipo, mt, mb, me, md, int(pixorg.width), int(pixorg.height), doclen, '', 0))
+            pathpdf2 = str(patpdf)
+            pathpdf2 = utilities_general.get_normalized_path(pathpdf2)
+            eq = utilities_general.get_eq_base(pathpdf2)
+            cursor.custom_execute(insert_query_pdf, (relpathpdf, 0,tipo, mt, mb, me, md, int(pixorg.width), int(pixorg.height), doclen, eq, 0))
             print(f"Inserting {patpdf} to DB --> OK")
             mmtopxtop = math.floor(mt/25.4*72)
             mmtopxbottom = math.ceil(pixorg.height-(mb/25.4*72))
@@ -925,8 +962,7 @@ def addrel_commandLine(patpdf):
             idpdf = cursor.lastrowid
             relp = Path(utilities_general.get_normalized_path(os.path.join(global_settings.pathdb.parent, str(relpathpdf))))
             relpdir = relp.parent
-            pathpdf2 = str(patpdf)
-            pathpdf2 = utilities_general.get_normalized_path(pathpdf2)
+            
             abs_path_pdf = pathpdf2
             try:
                 nameddests = grabNamedDestinations(doc)
@@ -1020,7 +1056,7 @@ def addrel_commandLine(patpdf):
             #global_settings.documents_to_index.append(abs_path_pdf)
             global_settings.infoLaudo[pathpdf2].id = idpdf
             global_settings.infoLaudo[pathpdf2].len = len(doc)
-            global_settings.infoLaudo[pathpdf2].parent_alias = ''
+            global_settings.infoLaudo[pathpdf2].parent_alias = utilities_general.get_eq_base(pathpdf2)
            
             global_settings.infoLaudo[pathpdf2].zoom_pos = 0
             global_settings.infoLaudo[pathpdf2].pixorgw = pixorg.width
@@ -1031,11 +1067,12 @@ def addrel_commandLine(patpdf):
                 global_settings.infoLaudo[pathpdf2].toc.append((toc[0], int(toc[2]), int(toc[3]), int(toc[4])))
             global_settings.infoLaudo[pathpdf2].ultimaPosicao=0.0
             global_settings.infoLaudo[pathpdf2].tipo = tipo
-            #class RelatorioSuccint:
+            #class RelatorioSuccint:,
+            parent_alias = utilities_general.get_eq_base(pathpdf2)
             #    def __init__(self, idpdf, toc, lenpdf, pixorgw, pixorgh, mt, mb, me, md, paginasindexadas, rel_path_pdf, abs_path_pdf, tipo):
             relatorio_proxy = classes_general.RelatorioSuccint(idpdf, global_settings.infoLaudo[pathpdf2].toc, global_settings.infoLaudo[pathpdf2].len, \
                                                                pixorg.width, pixorg.height, mt, mb, me, md, 0, \
-                                                                   relpathpdf, pathpdf2, tipo)   
+                                                                   relpathpdf, pathpdf2, tipo, parent_alias)   
             global_settings.listaRELS[pathpdf2] = relatorio_proxy
             for i in range(global_settings.nthreads):
                 
@@ -1075,8 +1112,11 @@ def addrel_commandLine(patpdf):
                                     " (hash_image, bbox_x0, bbox_y0, bbox_x1, bbox_y1, pagina) VALUES (?,?,?,?,?,?)"
                 pdfsql_images = 'Anexo_Eletronico_Images_id_pdf_'+str(idpdf)
                 cursor.custom_executemany(sql_insert_content, insert_content)
+
+                
                 sqliteconn.commit()
                 print(f"Indexing processes finalized {abs_path_pdf} - saving to database --> OK DONE")
+                
                 return True
             return False
             
@@ -1204,7 +1244,7 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
                         if(global_settings.infoLaudo[abs_path_pdf].status == 'indexado'):
                             paginasindexadas = doclen
                         global_settings.infoLaudo[abs_path_pdf].paginasindexadas = paginasindexadas
-                          
+                        parent_alias = utilities_general.get_eq_base(abs_path_pdf)
                         #class RelatorioSuccint:
                         #    def __init__(self, idpdf, toc, lenpdf, pixorgw, pixorgh, mt, mb, me, md, paginasindexadas, rel_path_pdf, abs_path_pdf, tipo):
                         relatorio_proxy = classes_general.RelatorioSuccint(r[0], global_settings.infoLaudo[abs_path_pdf].toc, \
@@ -1212,7 +1252,7 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
                                                                            global_settings.infoLaudo[abs_path_pdf].pixorgw, \
                                                                                global_settings.infoLaudo[abs_path_pdf].pixorgh, \
                                                                                    r[3], r[4], r[5], r[6], paginasindexadas, \
-                                                                               relpathpdf, abs_path_pdf, r[2])   
+                                                                               relpathpdf, abs_path_pdf, r[2], parent_alias)   
                         global_settings.listaRELS[abs_path_pdf] = relatorio_proxy
 
                     else:
@@ -1232,7 +1272,7 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
                             doclen = len(doc)
                             doc.close()
                             pdf = (patpdf, global_settings.default_margin_top, global_settings.default_margin_bottom, \
-                                   global_settings.default_margin_left, global_settings.default_margin_right, pixorg, doclen, '', 0)
+                                   global_settings.default_margin_left, global_settings.default_margin_right, pixorg, doclen, utilities_general.get_eq_base(patpdf), 0)
                         if(pdf==None):
                             print("ERRO")
                             continue
@@ -1301,6 +1341,7 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
                             """
                             cursor.custom_executemany(insert_query_toc, listatocs)
                             print("COmmit lista tocs", len(listatocs))
+                            parent_alias = utilities_general.get_eq_base(pathpdf2)
                             global_settings.infoLaudo[pathpdf2] = classes_general.Relatorio() 
                             global_settings.infoLaudo[pathpdf2].mt = mt
                             global_settings.infoLaudo[pathpdf2].mb = mb
@@ -1312,7 +1353,7 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
                             global_settings.documents_to_index.append(abs_path_pdf)
                             global_settings.infoLaudo[pathpdf2].id = idpdf
                             global_settings.infoLaudo[pathpdf2].len = len(doc)
-                            global_settings.infoLaudo[pathpdf2].parent_alias = ''
+                            global_settings.infoLaudo[pathpdf2].parent_alias = utilities_general.get_eq_base(pathpdf2)
                            
                             global_settings.infoLaudo[pathpdf2].zoom_pos = 0
                             global_settings.infoLaudo[pathpdf2].pixorgw = pixorg.width
@@ -1325,9 +1366,11 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
                             global_settings.infoLaudo[pathpdf2].tipo = tipo
                             #class RelatorioSuccint:
                             #    def __init__(self, idpdf, toc, lenpdf, pixorgw, pixorgh, mt, mb, me, md, paginasindexadas, rel_path_pdf, abs_path_pdf, tipo):
+                            
+                            
                             relatorio_proxy = classes_general.RelatorioSuccint(idpdf, global_settings.infoLaudo[pathpdf2].toc, global_settings.infoLaudo[pathpdf2].len, \
                                                                                pixorg.width, pixorg.height, mt, mb, me, md, 0, \
-                                                                                   relpathpdf, pathpdf2, tipo)   
+                                                                                   relpathpdf, pathpdf2, tipo, parent_alias)   
                             global_settings.listaRELS[pathpdf2] = relatorio_proxy
                             
                                                        
@@ -1552,31 +1595,22 @@ def createNewDbFile(toplevel=None, sqliteconnx=None):
             id_termo INTEGER PRIMARY KEY AUTOINCREMENT,
             termo TEXT NOT NULL,
             tipobusca TEXT NOT NULL, 
+            tipo TEXT NOT NULL default 'relatorio',
             fixo INTEGER NOT NULL,
             pesquisado TEXT)  
             '''
     
-            create_table_searchpdfs = '''CREATE TABLE Anexo_Eletronico_SearchPdfs (
-            id_termo_pdf INTEGER PRIMARY KEY AUTOINCREMENT,
-            id_pdf INTEGER NOT NULL,
-            id_termo INTEGER NOT NULL,
-            CONSTRAINT fk_pdf
-                FOREIGN KEY (id_pdf)
-                    REFERENCES Anexo_Eletronico_Pdfs (id_pdf)
-                    ON DELETE CASCADE,
-            CONSTRAINT fk_id_termo
-                FOREIGN KEY (id_termo)
-                    REFERENCES Anexo_Eletronico_SearchTerms (id_termo)
-                    ON DELETE CASCADE
-            )  
-            '''
-            
+             
             create_table_searchesresults = '''CREATE TABLE Anexo_Eletronico_SearchResults (
             id_termo INTEGER NOT NULL,
             id_pdf INTEGER NOT NULL,
             pagina INTEGER NOT NULL,
-            init INTEGER NOT NULL,
-            fim INTEGER NOT NULL,
+            init INTEGER,
+            fim INTEGER,
+            x0 INTEGER,
+            y0 INTEGER,
+            x1 INTEGER,
+            y1 INTEGER,
             toc TEXT,
             snippetantes TEXT,
             snippetdepois TEXT,
@@ -1591,6 +1625,8 @@ def createNewDbFile(toplevel=None, sqliteconnx=None):
                 ON DELETE CASCADE
             )
             '''
+            
+
             
             create_table_obscat = '''CREATE TABLE Anexo_Eletronico_Obscat (
             id_obscat INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1687,115 +1723,7 @@ def createNewDbFile(toplevel=None, sqliteconnx=None):
             if(sqliteconnx==None):            
                 sqliteconn.close()
                 
-"""
-def start_up_app():
-    
-    sqliteconn = None
-    try:
-        if(len(sys.argv) == 1): 
-            import_create_toplevel()            
-            if(global_settings.pathdb == None):
-                return  
-            else:
-                sys.argv.append(str(global_settings.pathdb))
-        global_settings.splash_window = classes_general.Splash_window(global_settings.root)
-        if(len(sys.argv) >= 2): 
-            filename, extension = os.path.splitext(sys.argv[1])
-            if(".pdf" == extension.lower()):
-                pathp = sys.argv[1]
-                global_settings.pathdb = Path(os.path.abspath(sys.argv[1])+".db")  
-                sqliteconn = None
-                tocommit = False
-                if(not os.path.exists(global_settings.pathdb)):
-                    
-                    #print(1)
-                    notindexed = []
-                    notindexed.append(pathp)
-                    global_settings.splash_window.window.deiconify()
-                    global_settings.splash_window.label['text'] = "Criando banco de dados..."
-                    global_settings.splash_window.label.update_idletasks()
-                    createNewDbFile(global_settings.root)   
-                    sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
-                    global_settings.splash_window.label['text'] = "Aguardando definição de margens..."
-                    global_settings.splash_window.label.update_idletasks()
-                    tupleinfo = addrels('relatorio', view=None, pathpdfinput = notindexed, \
-                                                       pathdbext=global_settings.pathdb, rootx=global_settings.root, sqliteconnx=sqliteconn)
-                    global_settings.splash_window.label['text'] = "Carregando ferramenta..."
-                    global_settings.splash_window.label.update_idletasks()
-                else:
-                    sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
-                    #print(2)
-                    cursor = sqliteconn.cursor()
-                    if(os.path.exists(str(global_settings.pathdb)+'.lock')):
-                        window = utilities_general.popup_window(sair=True, texto = \
-                                    "O banco de dados aparentemente está aberto em outra execução!\nO programa irá encerrar para evitar inconsistências.\n"+\
-                                     "Para corrigir esse problema:\nVerifique outras execuções utilizando o mesmo banco de dados\n ou \nApague o arquivo <{}>".\
-                                         format(str(global_settings.pathdb)+'.lock'))
-                        global_settings.root.wait_window(window)                                            
-                    utilities_general.validate_annotation(sqliteconn, cursor)
-                    must_validate = utilities_general.necessity_to_validate(cursor)
-                    
-                    if(must_validate):
-                        tocommit = utilities_general.validate_new_db_columns(cursor, must_validate)
-                        utilities_general.update_db_version(sqliteconn, cursor)
-                    notindexed = []
-                    select_all_pdfs = '''SELECT  P.id_pdf, P.indexado, P.rel_path_pdf FROM 
-                    Anexo_Eletronico_Pdfs P 
-                    '''
-                    try:
-                        cursor.custom_execute(select_all_pdfs, None, True, False)
-                        relats = cursor.fetchall()
-                        notindexed.append(pathp)
-                        for rel in relats:                                   
-                            notindexed.append(os.path.join(global_settings.pathdb.parent, rel[2]))
-                        if(len(notindexed)>0): 
-                            tupleinfo = addrels('relatorio', pathpdfinput = notindexed, pathdbext=sys.argv[1], \
-                                                                   rootx=global_settings.root, sqliteconnx=sqliteconn)
-                    except sqlite3.OperationalError as ex:  
-                        notindexed.append(pathp)
-                        try:
-                            sqliteconn.close()
-                        except:
-                            None
-                        createNewDbFile(global_settings.root) 
-                        sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))                           
-                        tupleinfo = addrels('relatorio', pathpdfinput = notindexed, pathdbext=sys.argv[1], rootx=global_settings.root, sqliteconnx=sqliteconn)                            
-                        indexing = True
-                #indexador_fera.gather_information_fromdb()
-                if(tocommit):
-                    sqliteconn.commit()
-                utilities_general.initiate_indexing_thread()
-                global_settings.initiate_processes()
-                start_time = time.time()
-                start_fera_app() 
-            elif(".db" == extension.lower()):
-                global_settings.pathdb = Path(sys.argv[1])    
-                gotoviewer = False
-                if(len(sys.argv) >= 3 and sys.argv[2]=='1'):
-                    gotoviewer = True  
-                sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
-                
-                utilities_general.gather_information_fromdb(sqliteconn)
-                sqliteconn.close()
-                utilities_general.initiate_indexing_thread()
-                if(not gotoviewer):
-                    global_settings.splash_window.window.withdraw()
-                    App(global_settings.version, gotoviewer)
-                if(global_settings.pathdb==None):
-                    return
-                global_settings.initiate_processes()
-                start_fera_app()  
-        else:
-            print(1)
-    except Exception as ex:
-        utilities_general.printlogexception(ex=ex)
-    finally:
-        try:
-            sqliteconn.close()
-        except:
-            None
-
-"""       
+   
 class import_create_toplevel():
     def __init__(self):
         def solicitarDiretorio(toplevel):

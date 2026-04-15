@@ -7,7 +7,7 @@ Created on Tue Feb  1 13:47:47 2022
 #codereview
 import time, math, sqlite3, sys, multiprocessing
 import utilities_general, classes_general, global_settings, os, re
-import fitz, traceback#, setproctitle
+import fitz, traceback
 from queue import PriorityQueue
 from pathlib import Path
 import subprocess, shutil
@@ -45,6 +45,34 @@ def logging_proces2s(erros_queue):
             None
         finally:
             None
+            
+def restart_table(idpdf):
+    sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
+    print("Indexing thread got connection")
+    cursor = sqliteconn.cursor()
+    cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf), None, False, False)
+    cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_config", None, False, False)
+    cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_content", None, False, False)
+    cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_data", None, False, False)
+    cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_docsize", None, False, False)
+    cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_idx", None, False, False)
+    cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Images_id_pdf_"+str(idpdf), None, False, False)
+    create_table_content = 'CREATE VIRTUAL TABLE Anexo_Eletronico_Conteudo_id_pdf_'+str(idpdf)+' USING fts4(texto, pdf_id UNINDEXED, pagina' ')'
+    cursor.custom_execute(create_table_content)
+    
+    create_table_images = '''CREATE TABLE Anexo_Eletronico_Images_id_pdf_{} (
+    id_image INTEGER PRIMARY KEY AUTOINCREMENT,
+    hash_image TEXT NOT NULL,
+    bbox_x0 INTEGER NOT NULL,
+    bbox_y0 INTEGER NOT NULL,
+    bbox_x1 INTEGER NOT NULL,
+    bbox_y1 INTEGER NOT NULL,   
+    pagina INTEGER NOT NULL
+    )
+    '''
+    cursor.custom_execute(create_table_images.format(str(idpdf)))
+    sqliteconn.commit()
+    sqliteconn.close()
 
 
 def indexing_thread_func():
@@ -75,32 +103,7 @@ def indexing_thread_func():
                 pdf = os.path.basename(abs_path_pdf)
                 fim = 0                    
                 totalPaginas += len(doc)
-                sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
-                print("Indexing thread got connection")
-                cursor = sqliteconn.cursor()
-                cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf), None, False, False)
-                cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_config", None, False, False)
-                cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_content", None, False, False)
-                cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_data", None, False, False)
-                cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_docsize", None, False, False)
-                cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Conteudo_id_pdf_"+str(idpdf)+"_idx", None, False, False)
-                cursor.custom_execute("DROP TABLE IF EXISTS Anexo_Eletronico_Images_id_pdf_"+str(idpdf), None, False, False)
-                create_table_content = 'CREATE VIRTUAL TABLE Anexo_Eletronico_Conteudo_id_pdf_'+str(idpdf)+' USING fts4(texto, pdf_id UNINDEXED, pagina' ')'
-                cursor.custom_execute(create_table_content)
-                
-                create_table_images = '''CREATE TABLE Anexo_Eletronico_Images_id_pdf_{} (
-                id_image INTEGER PRIMARY KEY AUTOINCREMENT,
-                hash_image TEXT NOT NULL,
-                bbox_x0 INTEGER NOT NULL,
-                bbox_y0 INTEGER NOT NULL,
-                bbox_x1 INTEGER NOT NULL,
-                bbox_y1 INTEGER NOT NULL,   
-                pagina INTEGER NOT NULL
-                )
-                '''
-                cursor.custom_execute(create_table_images.format(str(idpdf)))
-                sqliteconn.commit()
-                sqliteconn.close()
+                restart_table(idpdf)
                 cont+=1
                 for i in range(global_settings.nthreads):
                     init = fim
@@ -136,6 +139,10 @@ def indexing_thread_func():
                 if(global_settings.listaRELS[abs_path_pdf].continuar_a_indexar and len(insert_content)==global_settings.infoLaudo[abs_path_pdf].len):
                     sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
                     cursor = sqliteconn.cursor()
+                    parent_alias = utilities_general.get_eq_base(abs_path_pdf)
+                    global_settings.processados.put(('indexando links - hashes', idpdf, "Indexando filelist/links", idpdf))
+                    utilities_general.add_links_from_pdf(sqliteconn, cursor, abs_path_pdf, parent_alias, idpdf)
+                    
                     hashpdf = str(utilities_general.md5(abs_path_pdf))
                     cursor.custom_execute("UPDATE Anexo_Eletronico_Pdfs set indexado = 1, hash = ? WHERE id_pdf = ?", (hashpdf, idpdf,))
                     print("Indexing processes finalized - saving to database")
@@ -263,7 +270,6 @@ def insertThread(processar, processados, listaRELS, pathdb, inserts, inserts_ima
                 doc2.close()
 
 def backgroundRendererImage(processed_pages, request_queue, response_queue, queuesair, listaRELS, erros_queue):   
-    #setproctitle.setproctitle(multiprocessing.current_process().name)
 
     docs = {}
     doc = None
@@ -352,7 +358,6 @@ def backgroundRendererImage(processed_pages, request_queue, response_queue, queu
                     None
                     
 def backgroundRendererXML(request_queuexml, response_queuexml, queuesair, listaRELS, erros_queue, listadeobs): 
-    #setproctitle.setproctitle(multiprocessing.current_process().name)
     docs = {}
     doc = None
     pathatual = None
@@ -507,42 +512,8 @@ def find_similar(bytes_from_image):
     return similar_full
                          
  
-def checkSearchQueue(searchqueue, listaTERMOS, result_queue, pedidos, pedidos_to_db, pathdb, erros_queue):
-    lowerCodeNoDiff = [ 
-      #00-0F #0
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #00-0F #16
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #10-1F #32
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #20-2F #48
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #30-3F #64
-       0,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,\
-       #40-4F #80
-      32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,   0,   0,   0,   0,   0,\
-      #50-5F #96
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #60-6F #112
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #70-7F #128
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #80-8F #144
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #90-9F #160
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #A0-AF #176
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #B0-BF #192
-       -95, -96, -97, -98, -99,-100,  32,-100, -99,-100,-101,-102, -99,-100,-101,-102,\
-     #C0-CF #208
-      32, -99, -99,-100,-101,-102,-103,   0,   0,-100,-101,-102,-103,-100,  32,   0,\
-      #D0-DF #224
-      -127,-128,-129,-130,-131,-132,   0,-132,-131,-132,-133,-134,-131,-132,-133,-134,\
-    #E0-EF #240
-       0,-131,-131,-132,-133,-134,-135,   0,   0,-132,-133,-134,-135,-132,   0,-134 \
-       #F0-FF #256
-       ]  
+def checkSearchQueue(searchqueue, listaTERMOS, result_queue, pedidos, pedidos_to_db, pathdb, erros_queue, fontebusca='relatorio'):
+
     try:
         sqliteconn = None
         commit = False
@@ -562,9 +533,9 @@ def checkSearchQueue(searchqueue, listaTERMOS, result_queue, pedidos, pedidos_to
                 for char in termo:
                     codePoint = ord(char)
                     if tipobusca=="MATCH" and (codePoint<256) and (codePoint>=192):
-                        codePoint += lowerCodeNoDiff[codePoint]
+                        codePoint += global_settings.lowerCodeNoDiff[codePoint]
                     elif(codePoint<256):
-                        codePoint += lowerCodeNoDiff[codePoint]
+                        codePoint += global_settings.lowerCodeNoDiff[codePoint]
                     novotermo += chr(codePoint) 
                     novotermo2 += chr(codePoint) 
                 novotermo = novotermo.strip()
@@ -578,7 +549,7 @@ def checkSearchQueue(searchqueue, listaTERMOS, result_queue, pedidos, pedidos_to
                 else:
                     termo = novotermo
                 #advancedsearchbool = int(advancedsearch)==1
-                
+                idtermo = None
                 pesquisados = ""
                 if((termo.upper(),tipobusca) in listaTERMOS and len(listaTERMOS[(termo.upper(), tipobusca)])>0):                            
                     idtermo = listaTERMOS[(termo.upper(),tipobusca)][2]
@@ -589,21 +560,20 @@ def checkSearchQueue(searchqueue, listaTERMOS, result_queue, pedidos, pedidos_to
                     if(cursor==None):
                         cursor = sqliteconn.cursor()
                         cursor.custom_execute("PRAGMA journal_mode=WAL")
-                    try:                        
-                        sql_insert_searchterm = "INSERT INTO Anexo_Eletronico_SearchTerms (termo, tipobusca, fixo, pesquisado) VALUES (?,?,?,?)" 
+                    try:  
+                        sql_insert_searchterm = "INSERT INTO Anexo_Eletronico_SearchTerms (termo, tipobusca, fixo, pesquisado, tipo) VALUES (?,?,?,?,?)" 
                         pesquisados = ""
-                        cursor.custom_execute(sql_insert_searchterm, (termo,tipobusca, 1,"",))
+                        cursor.custom_execute(sql_insert_searchterm, (termo,tipobusca, 1,"", fontebusca,))
                         idtermo = cursor.lastrowid
                         listaTERMOS[(termo.upper(),tipobusca)] = [termo,tipobusca, idtermo, ""]
-                        commit = True
-                                    
+                        commit = True                                 
                         #cursor.close() 
                     except Exception as ex:
-                        None
+                        erros_queue.put(('3', termo, tipobusca, idtermo, traceback.format_exc()))
                     
                 if((termo.upper(),tipobusca) in listaTERMOS):
                         
-                    resultsearch = classes_general.ResultSearch()
+                    resultsearch = classes_general.ResultSearch(fontebusca)
                     resultsearch.termo = termo
                     resultsearch.tipobusca = tipobusca
                     resultsearch.idtermo = str(idtermo)
@@ -629,12 +599,22 @@ def checkSearchQueue(searchqueue, listaTERMOS, result_queue, pedidos, pedidos_to
         erros_queue.put(('2', traceback.format_exc()))
         #erros_queue.put(('2', ex))  
         
-def searchProcess(result_queue, pathdb, erros_queue, queuesair, searchqueue, update_queue, listaRELS, listaTERMOS, estavel=False):  
-    #setproctitle.setproctitle(multiprocessing.current_process().name)
+def searchProcess(result_queue, pathdb, erros_queue, queuesair, searchqueue, update_queue, listaRELS, 
+                  listaTERMOS, info_index, hashes_to_position, idpdf_to_pathpdf, estavel=False):  
     historicoDeParsing = {}
     pedidos = PriorityQueue()
+    fontebusca = 'relatorio'
+    tocs_pdf = {}
+    hashes = {}
+    for key_in_listaRELS in listaRELS.keys():
+        tocs_pdf[key_in_listaRELS] = []
+        for toc_unit in listaRELS[key_in_listaRELS].tocpdf:
+            tocs_pdf[key_in_listaRELS].append(toc_unit)
     while(True): 
-        if(not searchqueue.empty()):           
+        if(not searchqueue.empty()):   
+            #erros_queue.put(('2', fontebusca+pedidos.get().termo)) 
+            if(info_index!=None):
+                fontebusca = 'arquivo'
             notok = True
             while(notok):
                 sqliteconn = None
@@ -646,10 +626,10 @@ def searchProcess(result_queue, pathdb, erros_queue, queuesair, searchqueue, upd
                     adv = []
                     notadv = []
                     #while len(searchqueue)>0:
-                    checkSearchQueue(searchqueue, listaTERMOS, result_queue, pedidos, pedidos_to_db, pathdb, erros_queue)
+                    checkSearchQueue(searchqueue, listaTERMOS, result_queue, pedidos, pedidos_to_db, pathdb, erros_queue, fontebusca)
                     while not pedidos.empty():
                         #while  len(searchqueue)>0:
-                        checkSearchQueue(searchqueue, listaTERMOS, result_queue, pedidos, pedidos_to_db, pathdb, erros_queue)                            
+                        checkSearchQueue(searchqueue, listaTERMOS, result_queue, pedidos, pedidos_to_db, pathdb, erros_queue, fontebusca)                            
                         pedidosearch_off_queue = pedidos.get()                   
                         termo =  pedidosearch_off_queue.termo
                         tipobusca = pedidosearch_off_queue.tipobusca
@@ -666,91 +646,22 @@ def searchProcess(result_queue, pathdb, erros_queue, queuesair, searchqueue, upd
                         sqliteconn = utilities_general.connectDB(str(pathdb), 5, maxrepeat=4)
                         try:
                             #if(sqliteconn
-                            needcommit = False
+                            
                             counter = 0
-                            tocs_pdf = {}
-                            for key_in_listaRELS in listaRELS.keys():
-                                tocs_pdf[key_in_listaRELS] = []
-                                for toc_unit in listaRELS[key_in_listaRELS].tocpdf:
-                                    tocs_pdf[key_in_listaRELS].append(toc_unit)
-                                    
-                            #erros_queue.put(('2', tocs_pdf[key_in_listaRELS]))
-                            result_queue.put((0.5, idtermo))
-                            for key_in_listaRELS in listaRELS.keys():
-                                if((termo.upper(),tipobusca) not in listaTERMOS):
-                                    needcommit = False
-                                    break
-                                abs_path_pdf = listaRELS[key_in_listaRELS].abs_path_pdf
-                                idpdf = listaRELS[key_in_listaRELS].idpdf
-                              
-                                idtermopdf = str(idpdf)+'-'+str(idtermo)
-                                cursor = sqliteconn.cursor()
-                                if("({})".format(idpdf) in pesquisadoadd):
-                                    get_search_results =  "SELECT id_termo, id_pdf, pagina, init, fim, toc, snippetantes, snippetdepois, termo "+\
-                                        "FROM Anexo_Eletronico_SearchResults  where id_termo = ? AND id_pdf = ? ORDER by 1,2,3,4"
-                                    cursor.custom_execute(get_search_results, (idtermo, idpdf,))
-                                    search_results = cursor.fetchall()
-                                    resultadosx = []
-                                    for result_res in search_results:
-                                        counter += 1
-                                        resultsearch = classes_general.ResultSearch()
-                                        resultsearch.toc = result_res[5]
-                                        resultsearch.idtermopdf = str(idtermopdf)
-                                        resultsearch.init = result_res[3]
-                                        resultsearch.fim = result_res[4]
-                                        resultsearch.pagina = result_res[2]
-                                        resultsearch.pathpdf = abs_path_pdf
-                                        resultsearch.idpdf = str(idpdf)
-                                        resultsearch.termo = termo
-                                        resultsearch.tipobusca = tipobusca
-                                        resultsearch.idtermo = str(idtermo)
-                                        resultsearch.prior=int(resultsearch.idtermo)*-1
-                                        snippetantes = result_res[6]
-                                        snippetdepois = result_res[7]
-                                        resultsearch.snippet =  (snippetantes, result_res[8], snippetdepois)                    
-                                        resultsearch.fixo = 1
-                                        resultsearch.counter = counter
-                                        #result_queue.put((0,  resultsearch)) 
-                                        try:                                        
-                                            resultsearch.tptoc = 'tp'+str(idtermopdf)+result_res[5]
-                                        except:
-                                            resultsearch.tptoc = None
-                                            #resultsearch.tptoc = 'tp'+str(idtermopdf)+result_res[5]
-                                        resultadosx.append(resultsearch)
-                                    if((termo.upper(),tipobusca) in listaTERMOS):
-                                        for i in range(0, len(resultadosx), global_settings.chunk_size_searches):
-                                            percent = int((i + global_settings.chunk_size_searches)/len(resultadosx)*100)
-                                            result_queue.put((1, resultadosx[i:i + global_settings.chunk_size_searches], percent))
-                                    else:
-                                        break
-                                    
-                                else:
-                                    retorno_sqlite_search = utilities_general.searchsqlite(tipobusca, termo, abs_path_pdf, pathdb, idpdf, queuesair=queuesair, idtermo=str(idtermo), \
-                                                                                    idtermopdf=str(idtermopdf), \
-                                                                 erros_queue = erros_queue, fixo = 1, result_queue = result_queue, \
-                                                                     sqliteconnx=None, tocs_pdf=tocs_pdf[abs_path_pdf], listaTERMOS=listaTERMOS)
-                                    search_results = retorno_sqlite_search[0]
-                                    resultadosx = retorno_sqlite_search[1]
-                                    
-                                    if(len(search_results)>0):
-                                        
-                                        
-                                        sql_insert_searchresukt =\
-                        "INSERT INTO Anexo_Eletronico_SearchResults (id_termo, id_pdf, pagina, init, fim, toc, snippetantes, snippetdepois, termo) VALUES (?,?,?,?,?,?,?,?,?)"
-                                        cursor.custom_executemany(sql_insert_searchresukt, (search_results))
-                                    pesquisadoadd += "({})".format(idpdf)
-                                    updateinto2 = "UPDATE Anexo_Eletronico_SearchTerms set pesquisado = ? WHERE id_termo = ?"  
-                                    cursor.custom_execute(updateinto2, (pesquisadoadd,idtermo,))
-                                    needcommit = True
-                                    if((termo.upper(),tipobusca) in listaTERMOS):
-                                        for i in range(0, len(resultadosx), global_settings.chunk_size_searches):
-                                            percent = int((i + global_settings.chunk_size_searches)/len(resultadosx)*100)
-                                            result_queue.put((1, resultadosx[i:i + global_settings.chunk_size_searches], percent))
-                                    else:
-                                        break
-                                    #result_queue.put((1, search_results))
+                            if(fontebusca=='relatorio'):
+                                resultsearch = classes_general.ResultSearch('relatorio')
+                                resultsearch.idtermo = str(idtermo)
+                                result_queue.put((0.5, resultsearch))
+                                counter, needcommit = search_on_reports(listaRELS, tocs_pdf, sqliteconn, pathdb, pesquisadoadd, idtermo, termo, tipobusca, listaTERMOS, result_queue, erros_queue, queuesair)
+                            elif(fontebusca=='arquivo'):
+                                resultsearch = classes_general.ResultSearch('arquivo')
+                                resultsearch.idtermo = str(idtermo)
+                                result_queue.put((0.5, resultsearch))
+                                counter, needcommit = search_on_files(listaTERMOS, tocs_pdf, idpdf_to_pathpdf, pathdb, result_queue, sqliteconn, 
+                                                                      cursor, idtermo, termo, tipobusca, info_index, pesquisadoadd, hashes_to_position, 
+                                                                      queuesair, erros_queue)
                             if((termo.upper(),tipobusca) in listaTERMOS):
-                                resultsearch = classes_general.ResultSearch()
+                                resultsearch = classes_general.ResultSearch(fontebusca)
                                 resultsearch.termo = termo
                                 resultsearch.tipobusca = tipobusca
                                 resultsearch.idtermo = str(idtermo)
@@ -758,15 +669,11 @@ def searchProcess(result_queue, pathdb, erros_queue, queuesair, searchqueue, upd
                                 resultsearch.end=True
                                 resultsearch.idpdf = str(math.inf)
                                 resultsearch.counter = counter + 1
-                                try:                                        
-                                    resultsearch.tptoc = 'tp'+str(idtermopdf)+str(result_res[5])
-                                except:
-                                    resultsearch.tptoc = None
                                 result_queue.put((2,  resultsearch)) 
                                 if(needcommit):
                                     sqliteconn.commit()
                                 listaTERMOS[(termo.upper(),tipobusca)] = [termo,tipobusca, idtermo, pesquisadoadd]
-                                pesquisadoadd = ""
+       
                         except classes_general.TimeLimitExecuteException as ex:
                             erros_queue.put(('3', termo, tipobusca, idtermo, "Ocorreu um erro inesperado e a operação não foi concluída.\n{}".format("Tempo limite de execução excedido.")) ) 
                             
@@ -804,7 +711,155 @@ def searchProcess(result_queue, pathdb, erros_queue, queuesair, searchqueue, upd
             if(not estavel):
                 break
             else:
-                time.sleep(1)          
+                time.sleep(1) 
+                
+def search_on_files(listaTERMOS, tocs_pdf, idpdf_to_pathpdf, pathdb, result_queue, sqliteconn, 
+                    cursor, idtermo, termo, tipobusca, info_index, pesquisadoadd, hashes_to_position, queuesair, erros_queue):
+    counter = 0
+    needcommit = False
+    for parent_alias in info_index:
+        if(info_index[parent_alias][0]=="Sim"):
+            fts_db = info_index[parent_alias][1]
+            cursor = sqliteconn.cursor()
+            if(f"({parent_alias})" in pesquisadoadd):
+                resultadosx, counter = get_previous_search_results(cursor, idtermo, termo, tipobusca, 
+                                                               parent_alias, 
+                                                               listaTERMOS, result_queue, counter, 
+                                                               pathdb, None, None, 'arquivo')
+                if((termo.upper(),tipobusca) in listaTERMOS):
+                    for i in range(0, len(resultadosx), global_settings.chunk_size_searches):
+                        percent = int((i + global_settings.chunk_size_searches)/len(resultadosx)*100)
+                        result_queue.put((1, resultadosx[i:i + global_settings.chunk_size_searches], percent))
+                else:
+                    break
+            else:
+                retorno_sqlite_search = utilities_general.searchsqlite_Files(idpdf_to_pathpdf, hashes_to_position, listaTERMOS, tocs_pdf, 
+                                                                             tipobusca, pathdb, fts_db, termo, idtermo, parent_alias, queuesair, erros_queue)
+                search_results = retorno_sqlite_search[0]
+                resultadosx = retorno_sqlite_search[1]
+                
+                if(len(search_results)>0):
+                    sql_insert_searchresukt =\
+    "INSERT INTO Anexo_Eletronico_SearchResults (id_termo, id_pdf, pagina, x0, y0, x1, y1, toc, snippetantes, snippetdepois, termo) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+                    cursor.custom_executemany(sql_insert_searchresukt, (search_results))
+                pesquisadoadd += "({})".format(parent_alias)
+                updateinto2 = "UPDATE Anexo_Eletronico_SearchTerms set pesquisado = ? WHERE id_termo = ?"  
+                cursor.custom_execute(updateinto2, (pesquisadoadd,idtermo,))
+                needcommit = True
+                if((termo.upper(),tipobusca) in listaTERMOS):
+                    for i in range(0, len(resultadosx), global_settings.chunk_size_searches):
+                        percent = int((i + global_settings.chunk_size_searches)/len(resultadosx)*100)
+                        result_queue.put((1, resultadosx[i:i + global_settings.chunk_size_searches], percent))
+                else:
+                    break
+    return counter, needcommit 
+                
+def search_on_reports(listaRELS, tocs_pdf, sqliteconn, pathdb, pesquisadoadd, idtermo, termo, tipobusca, listaTERMOS, result_queue, erros_queue, queuesair):
+    counter = 0
+    needcommit = False
+    for key_in_listaRELS in listaRELS.keys():
+        if((termo.upper(),tipobusca) not in listaTERMOS):
+            needcommit = False
+            break
+        abs_path_pdf = listaRELS[key_in_listaRELS].abs_path_pdf
+        idpdf = listaRELS[key_in_listaRELS].idpdf
+        
+        idtermopdf = str(idpdf)+'-'+str(idtermo)
+        cursor = sqliteconn.cursor()
+        if("({})".format(idpdf) in pesquisadoadd):
+            resultadosx, counter = get_previous_search_results(cursor, idtermo, termo, tipobusca, 
+                                                            listaRELS[key_in_listaRELS].parent_alias, 
+                                                            listaTERMOS, result_queue, counter, 
+                                                            pathdb, abs_path_pdf, idpdf, 'relatorio')
+            if((termo.upper(),tipobusca) in listaTERMOS):
+                for i in range(0, len(resultadosx), global_settings.chunk_size_searches):
+                    percent = int((i + global_settings.chunk_size_searches)/len(resultadosx)*100)
+                    result_queue.put((1, resultadosx[i:i + global_settings.chunk_size_searches], percent))
+            else:
+                break
+            
+        else:
+            retorno_sqlite_search = utilities_general.searchsqlite(tipobusca, termo, abs_path_pdf, pathdb, idpdf, queuesair=queuesair, idtermo=str(idtermo), \
+                                                            idtermopdf=str(idtermopdf), \
+                                            erros_queue = erros_queue, fixo = 1, result_queue = result_queue, \
+                                                sqliteconnx=None, tocs_pdf=tocs_pdf[abs_path_pdf], listaTERMOS=listaTERMOS, parent_alias=listaRELS[abs_path_pdf].parent_alias, info_index=None)
+            search_results = retorno_sqlite_search[0]
+            resultadosx = retorno_sqlite_search[1]
+            
+            if(len(search_results)>0):
+                
+                
+                sql_insert_searchresukt =\
+"INSERT INTO Anexo_Eletronico_SearchResults (id_termo, id_pdf, pagina, init, fim, toc, snippetantes, snippetdepois, termo) VALUES (?,?,?,?,?,?,?,?,?)"
+                cursor.custom_executemany(sql_insert_searchresukt, (search_results))
+            pesquisadoadd += "({})".format(idpdf)
+            updateinto2 = "UPDATE Anexo_Eletronico_SearchTerms set pesquisado = ? WHERE id_termo = ?"  
+            cursor.custom_execute(updateinto2, (pesquisadoadd,idtermo,))
+            needcommit = True
+            if((termo.upper(),tipobusca) in listaTERMOS):
+                for i in range(0, len(resultadosx), global_settings.chunk_size_searches):
+                    percent = int((i + global_settings.chunk_size_searches)/len(resultadosx)*100)
+                    result_queue.put((1, resultadosx[i:i + global_settings.chunk_size_searches], percent))
+            else:
+                break
+            #result_queue.put((1, search_results))
+    return counter, needcommit 
+                
+def get_previous_search_results(cursor, idtermo, termo, tipobusca, parent_alias, listaTERMOS, result_queue, counter, db_file, abs_path_pdf=None, idpdf=None, fonte = 'relatorio'):
+    idpdfsql = ""
+    
+    if(idpdf!=None):
+        idpdfsql = "AND id_pdf = ?"
+        get_search_results =  f"SELECT id_termo, id_pdf, pagina, init, fim, toc, snippetantes, snippetdepois, termo "+\
+                    f"FROM Anexo_Eletronico_SearchResults  where id_termo = ? {idpdfsql} ORDER by 1,2,3,4"
+        cursor.custom_execute(get_search_results, (idtermo, idpdf,))
+    else:
+        get_search_results =  f"""SELECT id_termo, t2.id_pdf, pagina, init, fim, toc, snippetantes, snippetdepois, termo, t2.rel_path_pdf, x0, y0, x1, y1
+        FROM Anexo_Eletronico_SearchResults t1
+        INNER JOIN Anexo_Eletronico_Pdfs t2 on (t1.id_pdf = t2.id_pdf)  where id_termo = ? ORDER by 1,2,3,4"""
+        cursor.custom_execute(get_search_results, (idtermo,))
+    search_results = cursor.fetchall()
+    resultadosx = []
+    for result_res in search_results:
+        counter += 1
+        resultsearch = classes_general.ResultSearch(fonte)
+        resultsearch.toc = result_res[5]
+        idtermopdf = str(result_res[1])+'-'+str(result_res[0])
+        idpdf = str(result_res[1])
+        resultsearch.idtermopdf = str(idtermopdf)
+        resultsearch.init = result_res[3]
+        resultsearch.fim = result_res[4]
+        resultsearch.pagina = int(result_res[2])
+        if(abs_path_pdf!=None):
+            resultsearch.pathpdf = abs_path_pdf
+        else:
+            resultsearch.pathpdf = (os.path.normpath(os.path.join(os.path.dirname(db_file), result_res[9])))
+        #resultsearch.link_position = (float(result_res[10]), float(result_res[11]), float(result_res[12]), float(result_res[13]))
+        resultsearch.link_position =None
+        resultsearch.idpdf = str(idpdf)
+        resultsearch.termo = termo
+        resultsearch.tipobusca = tipobusca
+        resultsearch.idtermo = str(idtermo)
+        resultsearch.prior=int(resultsearch.idtermo)*-1
+        resultsearch.parent_alias = parent_alias
+        #print(resultsearch.parent_alias)
+        snippetantes = result_res[6]
+        snippetdepois = result_res[7]
+        resultsearch.snippet =  (snippetantes, result_res[8], snippetdepois)                    
+        resultsearch.fixo = 1
+        resultsearch.counter = counter
+        #result_queue.put((0,  resultsearch)) 
+        try:                                        
+            resultsearch.tptoc = 'tp'+str(idtermopdf)+result_res[5]
+        except:
+            resultsearch.tptoc = None
+            #resultsearch.tptoc = 'tp'+str(idtermopdf)+result_res[5]
+        resultadosx.append(resultsearch)
+    return resultadosx, counter
+    
+                
+                
+      
 
 def processBatchInsertObs(listadeitenscompleto, allitens):
         doc = None

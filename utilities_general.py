@@ -5,13 +5,14 @@ Created on Tue Feb  1 13:52:40 2022
 @author: labinfo
 """
 #codereview
+import traceback
 try:
     import webview
 except:
-    pass
+    traceback.print_exc()
 import global_settings, utilities_general, classes_general, process_functions
 import sys, os
-import traceback
+
 from pathlib import Path
 import threading as thr
 import sqlite3
@@ -90,6 +91,7 @@ def show_locations(url, titulo, pid):
     try:
         webview.create_window(f"P{pid} - {titulo}", url, width=1024, height=768, text_select=True)
         webview.start()
+        print("webview started")
     except Exception as ex:
         utilities_general.printlogexception(ex=ex)
     #local_root.mainloop()
@@ -135,12 +137,13 @@ def necessity_to_validate(cursor):
                     else:
                         return False
                 except:
-                    actualdbversion = "1.0"
+                    actualdbversion = global_settings.dbversion
                     updateinto2 = "UPDATE FERA_CONFIG set param = ? WHERE config = ?"
                     cursor.custom_execute(updateinto2, (actualdbversion,'dbversion',))
                     return True
         return True
     except Exception as ex:
+        global_settings.allok = 774
         utilities_general.printlogexception(ex=ex)
         
 def validate_new_db_columns(cursor, must_commit=False):
@@ -162,10 +165,15 @@ def validate_new_db_columns(cursor, must_commit=False):
     except Exception as ex:
         None
     try:
-       cursor.custom_execute('ALTER TABLE Anexo_Eletronico_SearchTerms ADD COLUMN pesquisado', None, False, False)
+       cursor.custom_execute('ALTER TABLE Anexo_Eletronico_SearchTerms ADD COLUMN pesquisado TEXT', None, False, False)
        commit = True
     except Exception as ex:
-        None
+        utilities_general.printlogexception(ex=ex)
+    try:
+       cursor.custom_execute("ALTER TABLE Anexo_Eletronico_SearchTerms ADD COLUMN tipo TEXT NOT NULL default 'relatorio'", None, False, False)
+       commit = True
+    except Exception as ex:
+        utilities_general.printlogexception(ex=ex)
     resulttable = '''SELECT name FROM sqlite_master WHERE type="table" AND name="Anexo_Eletronico_SearchResults"'''
     cursor.custom_execute(resulttable)
     tableresultcount = cursor.fetchone()
@@ -174,8 +182,12 @@ def validate_new_db_columns(cursor, must_commit=False):
         id_termo INTEGER NOT NULL,
         id_pdf INTEGER NOT NULL,
         pagina INTEGER NOT NULL,
-        init INTEGER NOT NULL,
-        fim INTEGER NOT NULL,
+        init INTEGER,
+        fim INTEGER,
+        x0 INTEGER,
+        y0 INTEGER,
+        x1 INTEGER,
+        y1 INTEGER,
         toc TEXT,
         snippetantes TEXT,
         snippetdepois TEXT,
@@ -194,6 +206,12 @@ def validate_new_db_columns(cursor, must_commit=False):
         commit = True  
 
         #commit = True 
+    """ try:
+        addcolumn = "ALTER TABLE Anexo_Eletronico_SearchResults ADD COLUMN type TEXT NOT NULL default 'relatorio'"
+        cursor.custom_execute(addcolumn)
+        commit = True  
+    except:
+        None """
     try:
         addcolumn = "ALTER TABLE Anexo_Eletronico_Obscat ADD COLUMN ordem INTEGER NOT NULL DEFAULT 0"
         cursor.custom_execute(addcolumn, None, False, False)
@@ -250,55 +268,259 @@ def validate_new_db_columns(cursor, must_commit=False):
         
     return commit
 
+def get_eq_base(arquivo):
+    arquivo_pasta = os.path.dirname(arquivo)
+    for k in range(3):
+        if("EQ" in os.path.basename(arquivo_pasta).upper()):
+            return os.path.basename(arquivo_pasta)
+        else:
+            arquivo_pasta = os.path.dirname(arquivo_pasta)
+    return "Documentos"
+
 def update_db_version(sqliteconn, cursor):
     updateinto2 = "UPDATE FERA_CONFIG set param = ? WHERE config = ?"
     cursor.custom_execute(updateinto2, (global_settings.dbversion,'dbversion',))
     sqliteconn.commit()
+    
+
+    
+def ensure_table_exists(sqliteconn, abs_path_pdf, idpdf):
+    table_schema = f"""
+        CREATE TABLE Anexo_Eletronico_Pdf_Hashes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id_pdf INTEGER,
+            hash TEXT NOT NULL,
+            page INTEGER NOT NULL,
+            x0 INTEGER NOT NULL,
+            y0 INTEGER NOT NULL,
+            x1 INTEGER NOT NULL,
+            y1 INTEGER NOT NULL,
+            original_path TEXT NOT NULL,
+            saved_as TEXT NOT NULL,
+            parent_alias TEXT NOT NULL, 
+            CONSTRAINT fk_idpdf
+                FOREIGN KEY (id_pdf)
+                    REFERENCES Anexo_Eletronico_Pdfs (id_pdf)
+                    ON DELETE CASCADE
+        );
+        """
+    """
+    Ensures the specified table exists. If it does not, creates it.
+
+    :param db_name: The SQLite database file name.
+    :param table_name: The name of the table to check/create.
+    :param table_schema: The SQL schema to create the table if it doesn't exist.
+    """
+    connection = sqliteconn
+    cursor = connection.cursor()
+    
+    # Check if the table exists
+    cursor.execute(f"""
+        SELECT name FROM sqlite_master WHERE type='table' AND name='Anexo_Eletronico_Pdf_Hashes';
+    """)
+    table_exists = cursor.fetchone()
+    
+    if not table_exists:
+        # Create the table if it does not exist
+        cursor.execute(table_schema)
+        print(f"Table 'Anexo_Eletronico_Pdf_Hashes' created.")
+        filelist = os.path.join(os.path.dirname(abs_path_pdf), 'sources', 'fileList.txt')
+        global_settings.texto_splash = f"Processando Filelist{os.path.basename(os.path.dirname(abs_path_pdf))}"
+        if(filelist not in global_settings.processed_filelist):
+            global_settings.processed_filelist[filelist] = global_settings.manager.list([None]*2)
+            global_settings.processed_filelist[filelist] = extract_hash_and_saved_as(filelist,  
+                                                                                     f"Processando Filelist{os.path.basename(os.path.dirname(abs_path_pdf))}",
+                                                                                     idpdf)
+        #connection.commit()
+        return False
+    else:
+        print(f"Table 'Anexo_Eletronico_Pdf_Hashes' already exists.")
+        return True
+
+    
+    
+def extract_hash_and_saved_as(file_path, texto, idpdf):
+    """
+    Extracts the hash and saved_as information from a file formatted as the example provided.
+
+    :param file_path: Path to the file to be processed.
+    :return: List of dictionaries with 'hash' and 'saved_as' keys.
+    """
+    results = {}
+    results2 = {}
+    pattern = re.compile(r"^([\da-f]{32})\s+(.+?)\[saved as (.+?)\]$")
+    inittime = time.time()
+    inittime2 = time.time()
+    cont = 0
+    with open(file_path, "r", encoding="utf-8") as file:
+        linhas = file.readlines()
+        for line in linhas:
+            cont += 1
+            if(time.time()-inittime>5):
+                global_settings.processados.put(('indexando links - hashes', idpdf, f"FileList {cont}/{len(linhas)}"))
+                global_settings.texto_splash = f"{texto} {cont}/{len(linhas)}"
+                inittime = time.time()
+            if(time.time()-inittime2>20):
+                print(f"{texto} {cont}/{len(linhas)}")
+                inittime2 = time.time()
+            match = pattern.match(line.strip())
+            if match:
+                hash_value, original_path, saved_as = match.groups()
+                results[saved_as] = (hash_value.upper(), original_path)
+                results2[hash_value] = (saved_as, original_path)
+
+    return results, results2
+    
+def extract_links_from_pdf(pdf_path, idpdf, filelist):
+    """
+    Extract links from all pages of a PDF and return their 'from' and 'file' keys if they exist.
+
+    :param pdf_path: Path to the PDF file.
+    :return: List of dictionaries containing extracted link details.
+    """
+    links2 = []
+    inittime = time.time()
+    inittime2 = time.time()
+    with fitz.open(pdf_path) as doc:
+        for page_num, page in enumerate(doc):
+            if(time.time()-inittime>2):
+                inittime = time.time()
+                global_settings.processados.put(('indexando links - hashes', idpdf, f"{os.path.basename(pdf_path)} {page_num}/{len(doc)}"))
+                global_settings.texto_splash = f"Processando Links {os.path.basename(pdf_path)} {page_num}/{len(doc)}"
+            if(time.time()-inittime2>15):
+                inittime2 = time.time()
+                print(f"Processando Links {os.path.basename(pdf_path)} {page_num}/{len(doc)}")
+            # Extract links from the current page
+            for link in page.get_links():
+                if('file' not in link): 
+                    continue
+                file = link['file']
+                if(file not in global_settings.processed_filelist[filelist][0]):
+                    continue
+                if(file[0:5]!= "files"):
+                    continue
+                hash = global_settings.processed_filelist[filelist][0][file][0]
+                original_path = global_settings.processed_filelist[filelist][0][file][1]
+                saved_as = global_settings.processed_filelist[filelist][1][hash][0]
+                x0, y0, x1, y1 = link.get("from", (0, 0, 0, 0))
+                """ if(hash not in global_settings.hashes_to_position):
+                    global_settings.hashes_to_position[hash] = {}
+                if(idpdf not in global_settings.hashes_to_position[hash]):
+                    global_settings.hashes_to_position[hash][idpdf] = []
+                global_settings.hashes_to_position[hash][idpdf].append((idpdf, hash, int(page_num),int(x0),int(y0),int(x1),int(y1))) """
+                links2.append((idpdf, hash, int(page_num),int(x0),int(y0),int(x1),int(y1), original_path, saved_as))
+    return links2
+
+
+def add_links_from_pdf(sqliteconn, cursor, abs_path_pdf, parent_alias, idpdf):
+    hashes_to_insert = {}
+    index_fts = os.path.join(os.path.dirname(abs_path_pdf), 'sources', 'index_fts.db')
+    files_folder = os.path.join(os.path.dirname(abs_path_pdf), 'files')
+    global_settings.info_index_boolean = False
+    if(os.path.exists(files_folder)):
+        if(os.path.exists(index_fts)):
+            global_settings.info_index_boolean = True
+            global_settings.info_index[parent_alias] = ("Sim", index_fts)
+            jaexiste = ensure_table_exists(sqliteconn, abs_path_pdf, idpdf)
+            if(not jaexiste):
+                filelist = os.path.join(os.path.dirname(abs_path_pdf), 'sources', 'fileList.txt')
+                hashes_to_insert = extract_links_from_pdf(abs_path_pdf, idpdf, filelist)
+                insert_hash = f"INSERT INTO Anexo_Eletronico_Pdf_Hashes (id_pdf, hash, page, x0, y0, x1, y1, original_path, saved_as, parent_alias) VALUES (?,?,?,?,?,?,?,?,?,?)"
+                cont = 0
+                inittime = time.time()
+                if(len(hashes_to_insert)>0):
+                        #cont += 1
+                        #if(time.time()-inittime>2):
+                        #    inittime = time.time()
+                        #    global_settings.texto_splash = f"Inserindo hashes {cont}{len(hashes_to_insert)}"
+                    cursor.custom_executemany(insert_hash, hashes_to_insert)
+                sqliteconn.commit()
+            else:
+                None#get_hashes_from_db()
+        else:
+            global_settings.info_index[parent_alias] = ("Não","")
+    else:
+        global_settings.info_index[parent_alias] = ("-","")
+    
+    
+def get_hashes_from_db():
+    check_previous_search =  "SELECT id_pdf, hash, page, x0, y0, x1, y1, original_path, saved_as, parent_alias FROM Anexo_Eletronico_Pdf_Hashes"
+    sqliteconn = None
+    global_settings.splash_window.label['text'] = "Carregando relação Links->Hashes..."
+    global_settings.splash_window.label.update_idletasks()
+    try:
+        sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
+        cursor = sqliteconn.cursor()
+        cursor.custom_execute(check_previous_search)    
+        records = cursor.fetchall()
         
-def gather_information_fromdb(sqliteconn):    
+        for idpdf, hash, pagenum, x0, y0, x1, y1 in records:
+            if(hash not in global_settings.hashes_to_position):
+                global_settings.hashes_to_position[hash] = {}
+            if(idpdf not in global_settings.hashes_to_position[hash]):
+                global_settings.hashes_to_position[hash][idpdf] = []
+            global_settings.hashes_to_position[hash][idpdf].append((idpdf, hash, pagenum, x0, y0, x1, y1))
+    except Exception as ex:
+        utilities_general.printlogexception(ex=ex)
+    finally:
+        if(sqliteconn):
+            sqliteconn.close()
+    
+
+def gather_information_fromdb(sqliteconn=None):    
     #doc = None  
+    if(sqliteconn==None):
+        sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
     #sqliteconn = utilities_general.connectDB(str(global_settings.pathdb))
     cursor = sqliteconn.cursor()
     must_validate = necessity_to_validate(cursor)
+    print("Will update db schema", must_validate)
     tocommit = False
     if(must_validate):
+        #global_settings.allok = 775
         tocommit = validate_new_db_columns(cursor, must_validate)
         update_db_version(sqliteconn, cursor)
     if(tocommit):
        sqliteconn.commit() 
     totalpaginas = 0
-    global_settings.splash_window.window.attributes("-alpha", 255)
-    try:
-        None
-        global_settings.splash_window.window.wm_attributes("-alpha", 255)
-    except:
-        None   
+      
     select_all_pdfs = '''SELECT  P.id_pdf, P.rel_path_pdf, P.lastpos, P.tipo, P.margemsup, P.margeminf,
     P.margemesq, P.margemdir, P.hash, P.indexado, P.pixorgw, P.pixorgh, P.doclen, P.parent_alias, P.zoom_pos FROM 
     Anexo_Eletronico_Pdfs P ORDER BY 4,2
     '''
     porcento = 0
-    global_settings.splash_window.label['text'] = f"Reunindo informações ({porcento}%)"
+    global_settings.texto_splash = f"Reunindo informações ({porcento}%)"
     cursor.custom_execute(select_all_pdfs)
     relats = cursor.fetchall()
     qtos = 0
     verificados = {}            
     cont = 0
     abs_path_pdf = None
+    index_fts_set = set()
+    
+    #no_files_set = set()
     for r in relats: 
+        idpdf= r[0]
+        
         abs_path_pdf = utilities_general.get_normalized_path(os.path.join(global_settings.pathdb.parent, str(r[1])))
-        qtos+=1
+        global_settings.idpdf_to_pathpdf[idpdf] = abs_path_pdf
+        global_settings.texto_splash = f"Processando {os.path.basename(abs_path_pdf)}"
+        parent_alias = r[13]
+        if(parent_alias==None or parent_alias==''):
+            parent_alias = utilities_general.get_eq_base(abs_path_pdf)
+        
+        add_links_from_pdf(sqliteconn, cursor, abs_path_pdf, parent_alias, idpdf)
+            
         porcento = round(qtos/len(relats)*100, 0)
-        global_settings.splash_window.label['text'] = f"Reunindo informações ({porcento}%)"
-        global_settings.splash_window.label.update()        
+        global_settings.texto_splash =  f"Reunindo informações ({porcento}%)"       
         global_settings.infoLaudo[abs_path_pdf] = classes_general.Relatorio()
         filename, file_extension = os.path.splitext(abs_path_pdf)
         if(file_extension.lower()==".pdf"):  
-            idpdf= r[0]
+            
             doclen = r[12]
             pixmapw = r[10]
             pixmaph = r[11]
-            parent_alias = r[13]
+            
             if(r[12]==None):
                 
                 doc = fitz.open(abs_path_pdf)
@@ -309,8 +531,9 @@ def gather_information_fromdb(sqliteconn):
                     pixmaph = int(pixorg.height)
                     updateinto2 = "UPDATE Anexo_Eletronico_Pdfs set pixorgw = ?, pixorgh= ?, doclen = ? WHERE id_pdf = ?"
                     cursor.custom_execute(updateinto2, (int(pixorg.width), int(pixorg.height), doclen, r[0],))
-                    sqliteconn.commit()
+                    #sqliteconn.commit()
                 except Exception as ex:
+                    global_settings.allok = 776
                     utilities_general.printlogexception(ex=ex)
                 finally:
                     doc.close()
@@ -348,10 +571,12 @@ def gather_information_fromdb(sqliteconn):
             paginasindexadas = 0
             if(not os.path.exists(abs_path_pdf)):
                 global_settings.infoLaudo[abs_path_pdf].status = 'erro'
+                global_settings.allok = 777
             else:
                 if(r[8]=='' or r[8]==None):
                     global_settings.infoLaudo[abs_path_pdf].status = 'naoindexado'
                     global_settings.documents_to_index.append(abs_path_pdf)
+                    global_settings.allok = 778
                 else:
                     
                     hashpdf = str(utilities_general.md5(abs_path_pdf))
@@ -359,17 +584,21 @@ def gather_information_fromdb(sqliteconn):
                         print(abs_path_pdf)
                         print(hashpdf.lower())
                         global_settings.infoLaudo[abs_path_pdf].status = 'incompativel'
+                        global_settings.allok = 779
                     else:
                         global_settings.infoLaudo[abs_path_pdf].status = 'indexado'
                         paginasindexadas = r[12]
-           
+            if(parent_alias==None or parent_alias==''):
+                parent_alias = utilities_general.get_eq_base(abs_path_pdf)
             relatorio_proxy = classes_general.RelatorioSuccint(r[0], global_settings.infoLaudo[abs_path_pdf].toc, global_settings.infoLaudo[abs_path_pdf].len, \
                                                                pixmapw, pixmaph, r[3], r[4], r[5], r[6], paginasindexadas, \
-                                                                   r[1], abs_path_pdf, r[2])   
+                                                                   r[1], abs_path_pdf, r[2], parent_alias)   
             global_settings.listaRELS[abs_path_pdf] = relatorio_proxy
             verificados[str(idpdf)] = "OK"              
             cont+=1  
+        
     validate_annotation(sqliteconn, cursor)
+    global_settings.finished_gathering_info = True
     
 def validate_annotation(sqliteconn, cursor):
     resulttable = '''SELECT name FROM sqlite_master WHERE type="table" AND name="Anexo_Eletronico_Annotations"'''
@@ -446,6 +675,7 @@ def validate_annotation(sqliteconn, cursor):
                                 
             sqliteconn.commit()
         except Exception as ex:
+            global_settings.allok = 780
             utilities_general.printlogexception(ex=ex)
         finally:
             try:
@@ -603,7 +833,7 @@ def popup_window(texto, sair, imagepcp=None):
 
 
 def printlogexception(printorlog='print', ex=None):
-    
+    #print(ex)
     #if(global_settings.log_window==None):
     try:
         global_settings.log_window_text.insert('end', traceback.format_exc())
@@ -638,16 +868,22 @@ def get_normalized_path(path):
 
 def concatVertical(images):
     if(len(images) > 0):
-        altura = 0
+        images = [im for im in images if im.width > 0 and im.height > 0]
+        if not images:
+            return None
+
+        # Compute a canvas that can hold the widest image
+        dst_width  = max(im.width for im in images)
+        dst_height = sum(im.height for im in images)
+
+        dst = Image.new('RGB', (dst_width, dst_height))
+        y_offset = 0
         for im in images:
-            altura += im.height
-        dst = Image.new('RGB', (images[0].width, altura))
-        posicao = 0
-        imagem = 0
-        while(imagem < len(images)):
-            dst.paste(images[imagem], (0, posicao))
-            posicao += images[imagem].height
-            imagem += 1                
+            # Optionally, you could center narrower images:
+            # x_offset = (dst_width - im.width) // 2
+            dst.paste(im, (0, y_offset))
+            y_offset += im.height
+
         return dst
     else:
         return None
@@ -719,57 +955,61 @@ def countChildren(treeview, treenode, putcount=True):
             if(treeview.tag_has("relsearch",treenode)):
                 valores = treeview.item(treenode, 'values')
                 treeview.item(treenode, values=(valores[0], valores[1], th, textoother,))
+            elif(treeview.tag_has("arqsearch",treenode)):
+                valores = treeview.item(treenode, 'values')
+                treeview.item(treenode, values=(valores[0], valores[1], th, textoother,))
     return th
 
 def locateToc(pagina, pdf, p0y=None, init=None, tocpdf=None):
-        pdf = utilities_general.get_normalized_path(pdf)
-        pdfx = (str(Path(pdf)))
-        pdfx = get_normalized_path(pdfx)
-        t = 0
-        napagina = False
-        naoachou = True
-        if(init!=None):
-            for t in range(len(tocpdf)-1):
-                if(pagina >= tocpdf[t][1] and pagina < tocpdf[t+1][1]):
-                    naoachou = False
-                    break   
-                elif(pagina >= tocpdf[t][1] and pagina <= tocpdf[t+1][1]):
-                    napagina = True
-                    
-                if(napagina and tocpdf[t+1][3] > init):  
-                    naoachou = False
-                    break
-            
-            if(naoachou):
-                if(pagina==0):
-                    t=0
-                else:
-                    t=len(tocpdf)-1
-                    
-        elif(p0y!=None):
-             for t in range(len(tocpdf)-1):
-                if(pagina >= tocpdf[t][1] and pagina < tocpdf[t+1][1]):
-                    naoachou = False
-                    break   
-                elif(pagina >= tocpdf[t][1] and pagina <= tocpdf[t+1][1]):
-                    napagina = True
-                    
-                if(napagina and tocpdf[t+1][2] > p0y):  
-                    naoachou = False
-                    break
-            
-             if(naoachou):
-                if(pagina==0):
-                    t=0
-                else:
-                    t=len(tocpdf)-1
+    pagina = int(pagina)
+    pdf = utilities_general.get_normalized_path(pdf)
+    pdfx = (str(Path(pdf)))
+    pdfx = get_normalized_path(pdfx)
+    t = 0
+    napagina = False
+    naoachou = True
+    if(init!=None):
+        for t in range(len(tocpdf)-1):
+            if(pagina >= tocpdf[t][1] and pagina < tocpdf[t+1][1]):
+                naoachou = False
+                break   
+            elif(pagina >= tocpdf[t][1] and pagina <= tocpdf[t+1][1]):
+                napagina = True
+                
+            if(napagina and tocpdf[t+1][3] > init):  
+                naoachou = False
+                break
         
-        t = min(t, len(tocpdf)-1)
-        t = max(0, t)
-        tocc=[pdf,'','']
-        if(len(tocpdf) > 0 and len(tocpdf[t])>0):
-            tocc = tocpdf[t]
-        return tocc
+        if(naoachou):
+            if(pagina==0):
+                t=0
+            else:
+                t=len(tocpdf)-1
+                
+    elif(p0y!=None):
+        for t in range(len(tocpdf)-1):
+            if(pagina >= tocpdf[t][1] and pagina < tocpdf[t+1][1]):
+                naoachou = False
+                break   
+            elif(pagina >= tocpdf[t][1] and pagina <= tocpdf[t+1][1]):
+                napagina = True
+                
+            if(napagina and tocpdf[t+1][2] > p0y):  
+                naoachou = False
+                break
+    
+        if(naoachou):
+            if(pagina==0):
+                t=0
+            else:
+                t=len(tocpdf)-1
+    
+    t = min(t, len(tocpdf)-1)
+    t = max(0, t)
+    tocc=[pdf,'','']
+    if(len(tocpdf) > 0 and len(tocpdf[t])>0):
+        tocc = tocpdf[t]
+    return tocc
   
 def iterateXREF_Names(doc, xref, abs_path_pdf, pismm, aprocurar, rereference, rename_dest, regex):
     chaves = doc.xref_get_keys(xref)
@@ -899,41 +1139,6 @@ def extract_text_from_page(doc, pagina, deslocy, topmargin, bottommargin, leftma
     #print("Extracing image:", extract_image)
     if(extract_image):
         flags = 2+4+64
-    lowerCodeNoDiff = [ 
-      #00-0F #0
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #00-0F #16
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #10-1F #32
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #20-2F #48
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #30-3F #64
-       0,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,\
-       #40-4F #80
-      32,  32,  32,  32,  32,  32,  32,  32,  32,  32,  32,   0,   0,   0,   0,   0,\
-      #50-5F #96
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #60-6F #112
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #70-7F #128
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #80-8F #144
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #90-9F #160
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #A0-AF #176
-       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,\
-       #B0-BF #192
-       -95, -96, -97, -98, -99,-100,  32,-100, -99,-100,-101,-102, -99,-100,-101,-102,\
-     #C0-CF #208
-      32, -99, -99,-100,-101,-102,-103,   0,   0,-100,-101,-102,-103,-100,  32,   0,\
-      #D0-DF #224
-      -127,-128,-129,-130,-131,-132,   0,-132,-131,-132,-133,-134,-131,-132,-133,-134,\
-    #E0-EF #240
-       0,-131,-131,-132,-133,-134,-135,   0,   0,-132,-133,-134,-135,-132,   0,-134 \
-       #F0-FF #256
-       ]  
     quadspagina = []
     mapeamento = {}
     dictx = doc[pagina].get_text("rawdict", flags=flags)  
@@ -985,7 +1190,7 @@ def extract_text_from_page(doc, pagina, deslocy, topmargin, bottommargin, leftma
                         if(replace_accent):
                             codePoint = ord(c)
                             if(codePoint<256):
-                                codePoint += lowerCodeNoDiff[codePoint]
+                                codePoint += global_settings.lowerCodeNoDiff[codePoint]
                             c = chr(codePoint)
                         mapeamento[bloco][linha].append((x0, y0, x1, y1, c))
                         quadspagina.append((x0, y0, x1, y1, c))
@@ -1023,6 +1228,7 @@ def extract_text_from_page(doc, pagina, deslocy, topmargin, bottommargin, leftma
                     images_extracted.append((image_hash, bbox_x0, bbox_y0, bbox_x1, bbox_y1, pagina))
                 except:
                     traceback.print_exc()
+    novotexto = novotexto.encode('utf-8', 'surrogatepass').decode('utf-8', 'ignore')
     return (init, novotexto, quadspagina, mapeamento, images_extracted)
 
 
@@ -1071,12 +1277,10 @@ def md5(path_pdf):
                 
 def searchsqlite(tipobusca, termo, pathpdf, pathdb, idpdf, simplesearch = False, queuesair = None, \
                  idtermo = None, idtermopdf = None, erros_queue = None, fixo = None, result_queue = None,\
-                     jarecords=None, sqliteconnx=None, tocs_pdf=None, listaTERMOS=None):
+                     jarecords=None, sqliteconnx=None, tocs_pdf=None, listaTERMOS=None, parent_alias=None, info_index=None, fontebusca='relatorio'):
     def re_fn(expr, item):
         reg = re.compile(expr, re.I)
         return reg.search(item) is not None
-    pathdocespecial1 = pathpdf
-    doc = fitz.open(pathdocespecial1)
     #destepdf = 0
     resultados_para_banco = []
     resultadosx = []
@@ -1144,7 +1348,7 @@ def searchsqlite(tipobusca, termo, pathpdf, pathdb, idpdf, simplesearch = False,
                     else:
                         toc = locateToc(pages[0], pathpdf, None, len(devoltainit), tocs_pdf)[0]
                     counter += 1
-                    resultsearch = classes_general.ResultSearch()
+                    resultsearch = classes_general.ResultSearch(fontebusca)
                     resultsearch.toc = toc
                     resultsearch.idtermopdf = str(idtermopdf)
                     resultsearch.init = len(devoltainit)
@@ -1157,6 +1361,8 @@ def searchsqlite(tipobusca, termo, pathpdf, pathdb, idpdf, simplesearch = False,
                     resultsearch.idtermo = str(idtermo)
                     resultsearch.prior=int(resultsearch.idtermo)*-1
                     resultsearch.tptoc = 'tp'+str(idtermopdf)+resultsearch.toc
+                    if(parent_alias!=None):
+                        resultsearch.parent_alias = parent_alias
                     snippet = ''.join(char if len(char.encode('utf-8')) <= 3 else '�' for char in pages[1])
                     snippetantes = ""
                     snippetdepois = ""
@@ -1274,7 +1480,9 @@ def searchsqlite(tipobusca, termo, pathpdf, pathdb, idpdf, simplesearch = False,
                     if(global_settings.limit_search > 0 and resultporsecao[toc]>=global_settings.limit_search):
                         break  
                     resultporsecao[toc]+=1
-                    resultsearch = classes_general.ResultSearch()
+                    resultsearch = classes_general.ResultSearch(fontebusca)
+                    if(parent_alias!=None):
+                        resultsearch.parent_alias = parent_alias
                     if(str(qualcharinit)+'-'+str(qualcharfim) in jaachados):
                         init = resultfind+len(termo)
                         resultfind = pagina[1].find(termo, init, len(pagina[1]))
@@ -1447,7 +1655,9 @@ def searchsqlite(tipobusca, termo, pathpdf, pathdb, idpdf, simplesearch = False,
                             counter += 1
                             #qualcharinit = resultfind
                             #qualcharfim = qualcharinit + len(match)
-                            resultsearch = classes_general.ResultSearch()
+                            resultsearch = classes_general.ResultSearch(fontebusca)
+                            if(parent_alias!=None):
+                                resultsearch.parent_alias = parent_alias
                                                     
                             resultsearch.init = qualcharinit
                             resultsearch.fim = qualcharinit + len(match)
@@ -1547,7 +1757,147 @@ def searchsqlite(tipobusca, termo, pathpdf, pathdb, idpdf, simplesearch = False,
         #utilities_general.printlogexception(ex=ex)
     
     finally: 
-        try:
-            doc.close()
-        except:
-            None
+        None
+        
+def searchsqlite_Files(idpdf_to_pathpdf, hashes_to_position, listaTERMOS, tocs_pdf, 
+                       tipobusca, pathdb, pathdb_files, termo, idtermo, parent_alias, queuesair, erros_queue):
+    def re_fn(expr, item):
+        reg = re.compile(expr, re.I)
+        return reg.search(item) is not None
+    #destepdf = 0
+    print(pathdb_files)
+    resultados_para_banco = []
+    resultadosx = []
+    sqliteconn = connectDB(str(pathdb_files), check_same_thread_arg=False)
+    try:       
+        cursor = sqliteconn.cursor()
+        cursor.execute(f"attach '{pathdb_files}' as db1")
+        cursor.execute(f"attach '{pathdb}' as db2")
+        records2 = []
+        novabusca = ""
+        if(tipobusca=="MATCH"):  
+            novabusca =  f"SELECT  H.hash, trim(replace(snippet(documents, -1, '', '', '...', 200), char(13), ' ')), H.id_pdf, H.page, H.x0, H.y0, H.x1, H.y1 \
+                FROM db1.documents C INNER JOIN \
+                db2.Anexo_Eletronico_Pdf_Hashes H on (C.hash = H.hash) where C.content MATCH ? ORDER BY 1"          
+        if(tipobusca=="LIKE"):  
+            novabusca =  f"SELECT  H.hash, trim(replace(snippet(documents, -1, '', '', '...', 200), char(13), ' ')), H.id_pdf, H.page, H.x0, H.y0, H.x1, H.y1 FROM db1.documents C \
+                INNER JOIN db2.Anexo_Eletronico_Pdf_Hashes H \
+                on (C.hash = H.hash) where C.content like :termo ESCAPE :escape ORDER BY 1"        
+        if(tipobusca=="REGEX"):  
+            sqliteconn.create_function("REGEXP", 2, re_fn)
+            novabusca =  f"SELECT H.hash, trim(replace(snippet(documents, -1, '', '', '...', 200), char(13), ' ')), H.id_pdf, H.page, H.x0, H.y0, H.x1, H.y1 \
+                FROM db2.documents INNER JOIN db2.Anexo_Eletronico_Pdf_Hashes H \
+                on (C.hash = H.hash) where C.content REGEXP :regex ORDER BY 1"
+        notok = True    
+        while(notok):
+            try:
+                
+                #cursor = sqliteconn.cursor()
+                if(tipobusca=="MATCH"):
+                    
+                    cursor.custom_execute("PRAGMA journal_mode=WAL")
+                    cursor.execute(novabusca, (termo.upper(),))                
+                    records2 = cursor.fetchall()
+                    notok = False
+                elif(tipobusca=="LIKE"):
+                    cursor.custom_execute("PRAGMA journal_mode=WAL")
+                    cursor.custom_execute(novabusca, {'termo':'%'+termo+'%', 'escape': '\\'})            
+                    records2 = cursor.fetchall()
+                    notok = False
+                elif(tipobusca=="REGEX"):
+                    cursor.custom_execute("PRAGMA journal_mode=WAL")
+                    cursor.custom_execute(novabusca, {'regex':termo}, timeout=30)
+                    records2 = cursor.fetchall()
+                    notok = False
+            except sqlite3.OperationalError as ex:
+                utilities_general.printlogexception(ex=ex)
+                time.sleep(2)
+            except Exception as ex:
+                utilities_general.printlogexception(ex=ex)
+                time.sleep(2)
+                
+            #rectspagina = {}
+        results = []
+        countpagina = 0
+        counter = 0
+        parar = False
+        
+        for hash_hit, snippet, idpdf, pagenum, x0, y0, x1, y1 in records2:
+            #if(hash_hit not in hashes_to_position):
+            #    continue
+            #for idpdf in hashes_to_position[hash_hit]:
+            #    for idpdf, hash, pagenum, x0, y0, x1, y1 in hashes_to_position[hash_hit][idpdf]:
+            if(listaTERMOS != None and not (termo.upper(),tipobusca) in listaTERMOS):
+                break
+            #resultporsecao = 0
+            if(parar):
+                inserts = []
+                break                
+            idtermopdf = str(idpdf)+'-'+str(idtermo)
+            toc = None
+            if(tocs_pdf==None):
+                toc = None
+            else:
+                toc = locateToc(int(pagenum), idpdf_to_pathpdf[idpdf], float(y0), None, tocs_pdf[idpdf_to_pathpdf[idpdf]])[0]
+            counter += 1
+            resultsearch = classes_general.ResultSearch('arquivo')
+            resultsearch.toc = toc
+            resultsearch.idtermopdf = str(idtermopdf)
+            resultsearch.link_position = (x0, y0, x1, y1)
+            resultsearch.pagina = int(pagenum)
+            resultsearch.pathpdf = idpdf_to_pathpdf[idpdf]
+            resultsearch.idpdf = str(idpdf)
+            resultsearch.termo = termo
+            resultsearch.tipobusca = tipobusca
+            resultsearch.idtermo = str(idtermo)
+            resultsearch.prior=int(resultsearch.idtermo)*-1
+            resultsearch.tptoc = 'tp'+str(idtermopdf)+resultsearch.toc
+            resultsearch.parent_alias = parent_alias
+            snippet = ''.join(char if len(char.encode('utf-8')) <= 3 else '�' for char in snippet)
+            snippetantes = ""
+            snippetdepois = ""
+            espacos = 0   
+            resultsearch.snippet =  ("",snippet ,"")                    
+            resultsearch.fixo = 1
+            resultsearch.counter = counter
+            resultados_para_banco.append((resultsearch.idtermo, resultsearch.idpdf, \
+                                            resultsearch.pagina, x0, y0, x1, y1, resultsearch.toc, snippetantes, snippetdepois, termo))
+            if(queuesair != None and not queuesair.empty()):
+                x = queuesair.get()    
+                if(x[0]=='pararbusca' and str(x[1])==str(idtermo)):                             
+                    parar = True
+                    resultadosx = []
+                elif(x[0]=='sairtudo'):
+                    if(cursor):
+                        cursor.close()              
+                    if(sqliteconn):
+                        sqliteconn.close()
+                    parar = True
+                    queuesair.put(x)
+                    erros_queue.put(('2', "Parar busca"))
+                    return 
+                else:
+                    queuesair.put(x)
+            if(parar):
+                resultadosx = []
+                break
+            resultadosx.append(resultsearch)
+                    
+        return [resultados_para_banco, resultadosx] 
+    except classes_general.TimeLimitExecuteException as ex:
+        raise
+            
+    except sqlite3.Error as ex:
+        raise
+        #erros_queue.put(('3', traceback.format_exc()))
+        #utilities_general.printlogexception(ex=ex)
+                    
+    except Exception as ex:
+        raise
+        #erros_queue.put(('3', traceback.format_exc()))
+        #utilities_general.printlogexception(ex=ex)
+    
+    finally: 
+        
+        if(sqliteconn):
+            sqliteconn.close()
