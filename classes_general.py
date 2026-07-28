@@ -1174,7 +1174,7 @@ class Relatorio():
         self.hash = ''
         self.status = ''
         self.parent_alias = ""
-        self.zoom_pos = 0
+        self.zoom_pos = None
         self.something_changed = False
         
 class RespostaDePaginaXML():
@@ -1784,4 +1784,3 @@ class CustomCanvas(tkinter.Canvas):
         #if(str(atual+1)!=self.program.pagVar.get()):
         #    self.program.pagVar.set(str(atual+1))
         #root.update_idletasks()
-

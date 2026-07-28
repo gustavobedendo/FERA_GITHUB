@@ -105,12 +105,15 @@ def indexing_thread_func():
                 totalPaginas += len(doc)
                 restart_table(idpdf)
                 cont+=1
+                global_settings.processar = mp.Queue()
                 for i in range(global_settings.nthreads):
                     init = fim
                     fim = math.ceil((i+1) * (len(doc)/global_settings.nthreads))
                     #__init__(self, idpdf, rel_path_pdf, pdf, init, fim, mt, mb, me, md)
-                    proc = Processar(idpdf, abs_path_pdf, pdf, init, min(fim, len(doc)), mt, mb, me, md) 
+                    proc = Processar(idpdf, abs_path_pdf, pdf, init, min(fim, len(doc)), mt, mb, me, md)
                     global_settings.processar.put(proc)
+                for i in range(global_settings.nthreads):
+                    global_settings.processar.put(None)
                 doc.close()
                 #insert_content = [global_settings.manager.list()*global_settings.nthreads]
                 insert_content= global_settings.manager.list()
@@ -224,8 +227,10 @@ def insertThread(processar, processados, listaRELS, pathdb, inserts, inserts_ima
         
         sqliteconn = None
         #None
-        while not processar.empty():
+        while True:
             proc = processar.get()
+            if proc is None:
+                break
             ppaginas = 0
             mt = proc.mt
             mb = proc.mb

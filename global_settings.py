@@ -7,6 +7,7 @@ Created on Tue Feb  1 13:40:44 2022
 """
 #codereview
 import os, platform
+import configparser
 import tkinter, re
 import multiprocessing as mp
 from multiprocessing.managers import SyncManager
@@ -16,6 +17,7 @@ import process_functions
 import utilities_general
 import math, sys
 from PIL import Image
+from PIL import ImageDraw
 from PIL import ImageTk
 #from vosk import Model
 from tkinter import ttk
@@ -39,6 +41,121 @@ def clear_log_window():
 global allok
 allok=0       
     
+LOGO_SETTINGS_SECTION = 'Logo'
+LOGO_SETTINGS_OPTION = 'custom_logo_path'
+LOGO_DEVELOPMENT_TEXT = 'Desenvolvido pela Seção Computação Forense - PCI-PR'
+LOGO_MAX_SIZE = (128, 128)
+
+def get_settings_file():
+    return os.path.join(os.getcwd(), 'settings.ini')
+
+def get_logo_storage_relative_path():
+    return os.path.join('Imagens', 'logoCustom.png')
+
+def _resolve_execution_path(path):
+    if(os.path.isabs(path)):
+        return path
+    return os.path.join(os.getcwd(), path)
+
+def _default_logo_path():
+    return os.path.join(utilities_general.get_application_path(), 'Imagens', 'logoDefault.png')
+
+def _read_custom_logo_path():
+    config = configparser.ConfigParser()
+    config.read(get_settings_file())
+    relative_path = config.get(LOGO_SETTINGS_SECTION, LOGO_SETTINGS_OPTION, fallback='')
+    if(relative_path):
+        absolute_path = _resolve_execution_path(relative_path)
+        if(os.path.exists(absolute_path)):
+            return absolute_path
+    return None
+
+def _write_custom_logo_path(relative_path):
+    config = configparser.ConfigParser()
+    config.read(get_settings_file())
+    if(not config.has_section(LOGO_SETTINGS_SECTION)):
+        config.add_section(LOGO_SETTINGS_SECTION)
+    config.set(LOGO_SETTINGS_SECTION, LOGO_SETTINGS_OPTION, relative_path)
+    with open(get_settings_file(), 'w') as config_file:
+        config.write(config_file)
+
+def _create_logo_photo(path, preserve_ratio=True):
+    with Image.open(path) as img:
+        img = img.convert('RGBA')
+        if(preserve_ratio):
+            img.thumbnail(LOGO_MAX_SIZE, Image.LANCZOS)
+        else:
+            img = img.resize(LOGO_MAX_SIZE, Image.LANCZOS)
+        return ImageTk.PhotoImage(img.copy())
+
+def _fit_logo_to_canvas(img):
+    img = img.convert('RGBA')
+    img.thumbnail(LOGO_MAX_SIZE, Image.LANCZOS)
+    canvas = Image.new('RGBA', LOGO_MAX_SIZE, (255, 255, 255, 0))
+    x = (LOGO_MAX_SIZE[0] - img.width) // 2
+    y = (LOGO_MAX_SIZE[1] - img.height) // 2
+    canvas.alpha_composite(img, (x, y))
+    return canvas
+
+def _create_fitted_logo_photo(path):
+    with Image.open(path) as img:
+        return ImageTk.PhotoImage(_fit_logo_to_canvas(img))
+
+def _create_logo_placeholder():
+    img = Image.new('RGBA', LOGO_MAX_SIZE, (245, 245, 245, 255))
+    draw = ImageDraw.Draw(img)
+    width = LOGO_MAX_SIZE[0] - 1
+    height = LOGO_MAX_SIZE[1] - 1
+    draw.rectangle((0, 0, width, height), outline=(180, 180, 180, 255))
+    draw.line((24, 24, width - 24, height - 24), fill=(210, 210, 210, 255), width=2)
+    draw.line((width - 24, 24, 24, height - 24), fill=(210, 210, 210, 255), width=2)
+    text = 'Logo'
+    text_bbox = draw.textbbox((0, 0), text)
+    text_width = text_bbox[2] - text_bbox[0]
+    text_height = text_bbox[3] - text_bbox[1]
+    text_x = (LOGO_MAX_SIZE[0] - text_width) // 2
+    text_y = (LOGO_MAX_SIZE[1] - text_height) // 2
+    draw.rectangle((text_x - 6, text_y - 4, text_x + text_width + 6, text_y + text_height + 4), fill=(245, 245, 245, 255))
+    draw.text((text_x, text_y), text, fill=(120, 120, 120, 255))
+    return ImageTk.PhotoImage(img)
+
+def load_current_logo():
+    global tkphotologo2, tkphotologo_custom, custom_logo_path, logo_customized
+    custom_logo_path = _read_custom_logo_path()
+    try:
+        tkphotologo2 = _create_logo_photo(_default_logo_path(), preserve_ratio=False)
+    except Exception as ex:
+        try:
+            utilities_general.printlogexception(ex=ex)
+        except:
+            None
+    logo_customized = custom_logo_path is not None
+    if(logo_customized):
+        try:
+            tkphotologo_custom = _create_fitted_logo_photo(custom_logo_path)
+            return
+        except Exception as ex:
+            custom_logo_path = None
+            logo_customized = False
+            try:
+                utilities_general.printlogexception(ex=ex)
+            except:
+                None
+    tkphotologo_custom = _create_logo_placeholder()
+
+def save_custom_logo(source_path):
+    global custom_logo_path, logo_customized, external_logo_enabled
+    relative_path = get_logo_storage_relative_path()
+    target_path = _resolve_execution_path(relative_path)
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    if(os.path.abspath(source_path) != os.path.abspath(target_path)):
+        with Image.open(source_path) as img:
+            _fit_logo_to_canvas(img).save(target_path, 'PNG')
+    _write_custom_logo_path(relative_path)
+    custom_logo_path = target_path
+    logo_customized = True
+    load_current_logo()
+
 
 def initiate_variables(commandline=False):
     global processes, searchprocesses, expertmode, lockmanipulation, env
@@ -57,15 +174,17 @@ def initiate_variables(commandline=False):
     global imprevfind, showhide, imnextfind, imfromFile, imtoFile, copyrestoblip, querysqlim, imageequip, filterimage, locationsmallicon
     global imagereportb, collapseimg, movecat, movecattop, movecatdown, movecatup, checki, itemimage, catimage, documents_to_index, locationicon
     global delcat, addcat, copycat, childpornb, gunb, drugb, violenceb, corruptionb, textb, sync, manager, indexingwindow, logimage
-    global tkphotologo, tkphotologo2, withnote, withoutnote, editcat, lupa, resultdoc, snippet, processar, processados, paginasindexadas, fera_main_window
+    global tkphotologo, tkphotologo2, tkphotologo_custom, withnote, withoutnote, editcat, lupa, resultdoc, snippet, processar, processados, paginasindexadas, fera_main_window
     global listaZooms, searchResultsDict, pathdb, splash_window, indexing, exit_flag, dbversion, recenttxt, indexing_thread, nthreads, docatual, model
     global movecatbottom, movecattop, processing_threads, logging_process, askformargins, default_margin_top, default_margin_bottom, default_margin_left
     global default_margin_right, is_dirty, imtoHash, idpdf_to_pathpdf, searchfilesicon, columns_files
     global orderazdown, orderazup, ordernumberdown, ordernumberup, ordergenericup, ordergenericdown, listavidformats, log_window, log_window_text
     global label_warning_error, send_vacuum, info_index, popup_whatsnew, info_index_boolean, processed_filelist, finished_gathering_info, texto_splash
+    global custom_logo_path, logo_customized, Font_tuple_Arial_8_logo
     exitFlag = False
     #global hashes_to_position
     texto_splash = ""
+    external_logo_enabled = False
     info_index_boolean = False
     popup_whatsnew = None
     #hashes_to_position = {}
@@ -201,6 +320,7 @@ def initiate_variables(commandline=False):
     root.rowconfigure(0, weight=1)
     
     Font_tuple_Arial_8 = tkfont.Font(family ="Helvetica", size=9)
+    Font_tuple_Arial_8_logo = tkfont.Font(family ="Helvetica", size=9, weight="bold", underline=1)
     Font_tuple_Arial_10 = tkfont.Font(family ="Helvetica", size=10)
     Font_tuple_Arial_8_italic = tkfont.Font(family ="Helvetica", size=9, slant="italic")
     Font_tuple_Arial_10_italic  = tkfont.Font(family ="Helvetica", size=9, slant="italic")
@@ -372,9 +492,7 @@ def initiate_variables(commandline=False):
     tkphotologo= tkinter.PhotoImage(data=logoNormalb)
     #width = 50
     #height = 50
-    img = Image.open(os.path.join(utilities_general.get_application_path(), "Imagens", "logoDefault.png"))
-    img = img.resize((128,128), Image.LANCZOS)
-    tkphotologo2 =  ImageTk.PhotoImage(img)
+    load_current_logo()
     #tkphotologo2= tkinter.PhotoImage(image=photoImg)
     #tkphotologo= tkinter.PhotoImage(data=logoNormal95b)
     withnoteb = b'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'

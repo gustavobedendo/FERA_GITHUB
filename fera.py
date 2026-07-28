@@ -13,10 +13,12 @@ Created on Wed Sep 16 13:45:26 2020
 """
 import traceback
 from threading import Thread
+import queue
 import tkinter
 import global_settings, whats_new
 import time, re
 from tkinter import ttk
+from tkinter.scrolledtext import ScrolledText
 import fitz
 import math
 import multiprocessing as mp
@@ -83,6 +85,48 @@ except:
     None
 
 class MainWindow():    
+    def _zoom_pos_from_current_zoom(self):
+        try:
+            return global_settings.listaZooms.index(global_settings.zoom)
+        except Exception:
+            try:
+                return min(range(len(global_settings.listaZooms)), key=lambda i: abs(global_settings.listaZooms[i] - global_settings.zoom))
+            except Exception:
+                return 0
+
+    def _coerce_zoom_pos(self, zoom_pos):
+        try:
+            zoom_pos = int(zoom_pos)
+        except Exception:
+            return None
+        return min(max(zoom_pos, 0), len(global_settings.listaZooms) - 1)
+
+    def _ensure_pdf_zoom_state(self, pathpdf, sourcepath=None):
+        try:
+            pathpdf = utilities_general.get_normalized_path(pathpdf)
+            info = global_settings.infoLaudo[pathpdf]
+            normalized_zoom_pos = self._coerce_zoom_pos(info.zoom_pos)
+            if(normalized_zoom_pos is not None):
+                info.zoom_pos = normalized_zoom_pos
+                return normalized_zoom_pos
+
+            source_zoom_pos = None
+            if(sourcepath is not None):
+                sourcepath = utilities_general.get_normalized_path(sourcepath)
+                if(sourcepath in global_settings.infoLaudo):
+                    source_zoom_pos = self._coerce_zoom_pos(global_settings.infoLaudo[sourcepath].zoom_pos)
+            if(source_zoom_pos is None and global_settings.pathpdfatual in global_settings.infoLaudo):
+                source_zoom_pos = self._coerce_zoom_pos(global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos)
+            if(source_zoom_pos is None):
+                source_zoom_pos = self._zoom_pos_from_current_zoom()
+
+            info.zoom_pos = source_zoom_pos
+            info.something_changed = True
+            return source_zoom_pos
+        except Exception as ex:
+            utilities_general.printlogexception(ex=ex)
+            return 0
+
     def fixed_map(self, option):
         return [elm for elm in self.style.map('Treeview', query_opt=option) if
           elm[:2] != ('!disabled', '!selected')]
@@ -362,6 +406,7 @@ class MainWindow():
                                     text_link = link['to']
                                 elif('uri' in link):
                                     text_link = link['uri']
+                                text_link = "" if text_link is None else str(text_link)
 
                                 if(text_link==""):
                                     xref = link['xref']
@@ -603,6 +648,150 @@ class MainWindow():
                 classes_general.FileTooltip(self.docInnerCanvas, rect.idrect, arquivo, global_settings.pathdb)
             except Exception as ex:
                 utilities_general.printlogexception(ex=ex)
+
+    def resolve_missing_external_link(self, filepath, link_reference):
+        """Resolve a missing PDF attachment through the manifest or a selected ZIP."""
+        resolved_filepath = utilities_general.resolve_iped_latex_manifest_link(
+            filepath,
+            global_settings.pathdb,
+            materialize_from_storage=False,
+        )
+        if(resolved_filepath is not None):
+            return resolved_filepath, False
+        if(platform.system() != 'Windows'):
+            return None, False
+
+        # A ZIP chosen successfully once is reused only while this FERA
+        # execution remains open.
+        resolved_filepath = self.materialize_external_link_with_status(filepath, link_reference=link_reference)
+        if(resolved_filepath is not None):
+            return resolved_filepath, False
+
+        messagebox.showinfo(
+            'Arquivo não materializado',
+            'O arquivo apontado pelo PDF não está materializado e não foi localizado no IPED.\n\n'
+            'Selecione o arquivo de anexo (.zip ou .zip.001) para o FERA extrair somente este arquivo.',
+            parent=global_settings.root,
+        )
+        while(True):
+            archive_path = askopenfilename(
+                parent=global_settings.root,
+                title='Selecione o anexo que contém o arquivo solicitado',
+                filetypes=(
+                    ('Anexos ZIP', '*.zip *.zip.001'),
+                    ('Todos os arquivos', '*'),
+                ),
+            )
+            if(archive_path == ''):
+                return None, True
+            resolved_filepath = self.materialize_external_link_with_status(filepath, archive_path, link_reference)
+            if(resolved_filepath is not None):
+                return resolved_filepath, True
+            retry = messagebox.askretrycancel(
+                'Arquivo não encontrado no anexo',
+                'O anexo selecionado não contém o arquivo solicitado pelo PDF.\n\n'
+                'Deseja selecionar outro anexo?',
+                parent=global_settings.root,
+            )
+            if(not retry):
+                return None, True
+
+    def show_materializing_window(self):
+        window = tkinter.Toplevel(global_settings.root)
+        window.title('Materializando arquivo')
+        window.configure(background='white')
+        window.resizable(False, False)
+        window.transient(global_settings.root)
+        window.protocol('WM_DELETE_WINDOW', lambda: None)
+
+        frame = tkinter.Frame(window, background='white', padx=28, pady=22)
+        frame.pack(fill='both', expand=True)
+        title = tkinter.Label(
+            frame,
+            text='Materializando arquivo...',
+            font=global_settings.Font_tuple_ArialBold_12,
+            background='white',
+            foreground='#202124',
+        )
+        title.pack(anchor='w')
+        detail = tkinter.Label(
+            frame,
+            text='Aguarde enquanto o FERA localiza e extrai o anexo.',
+            font=global_settings.Font_tuple_Arial_10,
+            background='white',
+            foreground='#5f6368',
+        )
+        detail.pack(anchor='w', pady=(6, 16))
+        progress = ttk.Progressbar(frame, mode='indeterminate', length=320)
+        progress.pack(fill='x')
+        progress.start(12)
+        log_text = ScrolledText(
+            frame,
+            height=8,
+            width=56,
+            wrap='word',
+            font=global_settings.Font_tuple_Arial_10,
+            background='#f8f9fa',
+            foreground='#3c4043',
+            relief='solid',
+            borderwidth=1,
+        )
+        log_text.pack(fill='both', expand=True, pady=(14, 0))
+        log_text.configure(state='disabled')
+        window.lift()
+        utilities_general.center(window)
+        window.update_idletasks()
+        return window, progress, log_text
+
+    def materialize_external_link_with_status(self, filepath, archive_path=None, link_reference=None):
+        window, progress, log_text = self.show_materializing_window()
+        result = {'filepath': None, 'error': None}
+        progress_queue = queue.Queue()
+
+        def progress_callback(message):
+            progress_queue.put(str(message))
+
+        def flush_progress_messages():
+            updated = False
+            while(True):
+                try:
+                    message = progress_queue.get_nowait()
+                except queue.Empty:
+                    break
+                log_text.configure(state='normal')
+                log_text.insert('end', f'{message}\n')
+                log_text.see('end')
+                log_text.configure(state='disabled')
+                updated = True
+            if(updated):
+                log_text.update_idletasks()
+
+        def worker():
+            try:
+                result['filepath'] = utilities_general.materialize_iped_archive_link(
+                    filepath, global_settings.pathdb, archive_path, link_reference, progress_callback
+                )
+            except Exception as ex:
+                result['error'] = ex
+
+        materializer = Thread(target=worker, daemon=True)
+        materializer.start()
+        try:
+            while(materializer.is_alive()):
+                flush_progress_messages()
+                global_settings.root.update()
+                time.sleep(0.05)
+            flush_progress_messages()
+        finally:
+            try:
+                progress.stop()
+                window.destroy()
+                global_settings.root.update_idletasks()
+            except:
+                None
+        if(result['error'] is not None):
+            utilities_general.printlogexception(ex=result['error'])
+        return result['filepath']
     
     def check_errors(self):
         try:
@@ -1224,6 +1413,7 @@ class MainWindow():
                     self.docInnerCanvas.config(scrollregion=(sobraEspaco, 0, sobraEspaco+ (global_settings.infoLaudo[newpath].pixorgw*global_settings.zoom*self.zoom_x), self.scrolly))
                     pagina = round(global_settings.infoLaudo[newpath].ultimaPosicao*global_settings.infoLaudo[newpath].len)   
                     global_settings.pathpdfatual = utilities_general.get_normalized_path(newpath)
+                    self._ensure_pdf_zoom_state(global_settings.pathpdfatual, pdfantigo)
                     if(global_settings.infoLaudo[pdfantigo].zoom_pos!=global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos):
                         self.zoomx(None, None, pdfantigo, global_settings.infoLaudo[newpath].ultimaPosicao)
                     else:
@@ -1280,6 +1470,7 @@ class MainWindow():
                 pagina = int(valores[3])
                 deslocy = float(valores[4])
                 ondeir = (float(pagina) / (global_settings.infoLaudo[global_settings.pathpdfatual].len)+(deslocy*self.zoom_x*global_settings.zoom)/self.scrolly)
+                self._ensure_pdf_zoom_state(global_settings.pathpdfatual, pdfantigo)
                 if(global_settings.infoLaudo[pdfantigo].zoom_pos!=global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos):
                     self.zoomx(None, None, pdfantigo)
                 #global_settings.root.after(1, lambda: self.docInnerCanvas.yview_moveto(ondeir))
@@ -2874,6 +3065,7 @@ class MainWindow():
                         self.maiorw = global_settings.infoLaudo[global_settings.pathpdfatual].pixorgw*self.zoom_x *global_settings.zoom           
                     self.scrolly = round((global_settings.infoLaudo[global_settings.pathpdfatual].pixorgh*self.zoom_x*global_settings.zoom), 16)*global_settings.infoLaudo[global_settings.pathpdfatual].len - 35
                     self.docInnerCanvas.config(scrollregion=(sobraEspaco, 0, sobraEspaco+ (global_settings.infoLaudo[global_settings.pathpdfatual].pixorgw*global_settings.zoom*self.zoom_x), self.scrolly))                
+                    self._ensure_pdf_zoom_state(global_settings.pathpdfatual, pdfantigo)
                     if(global_settings.infoLaudo[pdfantigo].zoom_pos!=global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos):
                         #global_settings.root.after(1, lambda: self.zoomx(None, None, pdfantigo))
                         self.zoomx(None, None, pdfantigo)
@@ -3679,6 +3871,27 @@ class MainWindow():
             self._update_top_frame("Hexadecimal")
         elif selected_tab == "Metadados":
             self._update_top_frame("Metadados") """
+
+    def change_logo(self):
+        try:
+            filepath = askopenfilename(
+                title="Selecionar logo",
+                filetypes=(
+                    ("Imagens", "*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp"),
+                    ("Todos os arquivos", "*.*"),
+                )
+            )
+            if(not filepath):
+                return
+            global_settings.save_custom_logo(filepath)
+            self.label_custom_logo.configure(image=global_settings.tkphotologo_custom)
+            self.label_custom_logo.image = global_settings.tkphotologo_custom
+            self.logo_credit_label.config(text=global_settings.LOGO_DEVELOPMENT_TEXT)
+            self.logo_credit_label.config(font=global_settings.Font_tuple_Arial_8_logo)
+            self.logo_credit_label.grid()
+        except Exception as ex:
+            utilities_general.printlogexception(ex=ex)
+            messagebox.showerror("Erro", "Não foi possível alterar a logo selecionada.")
             
     def leftPanel(self):
           
@@ -3696,8 +3909,28 @@ class MainWindow():
             self.logoframe.rowconfigure(0, weight=1)
             self.logoframe.columnconfigure(0, weight=1)
             self.logoframe.grid(row=0, column=0, sticky='nswe')
-            self.labelpcp = tkinter.Label(self.logoframe, image=global_settings.tkphotologo2)
-            self.labelpcp.grid(row=0, column=0, sticky='n')            
+            if(getattr(global_settings, 'external_logo_enabled', False)):
+                self.logo_images_frame = tkinter.Frame(self.logoframe, highlightthickness=0)
+                self.logo_images_frame.grid(row=0, column=0, sticky='n')
+                self.logo_images_frame.columnconfigure((0, 1), weight=1)
+                self.labelpcp = tkinter.Label(self.logo_images_frame, image=global_settings.tkphotologo2)
+                self.labelpcp.image = global_settings.tkphotologo2
+                self.labelpcp.grid(row=0, column=0, sticky='n', padx=(0, 4))
+                self.label_custom_logo = tkinter.Label(self.logo_images_frame, image=global_settings.tkphotologo_custom)
+                self.label_custom_logo.image = global_settings.tkphotologo_custom
+                self.label_custom_logo.grid(row=0, column=1, sticky='n', padx=(4, 0))
+                self.logo_credit_label = tkinter.Label(self.logoframe, font=global_settings.Font_tuple_Arial_8_logo, text=global_settings.LOGO_DEVELOPMENT_TEXT)
+                self.logo_credit_label.grid(row=1, column=0, sticky='n', padx=4, pady=(0, 4))
+                if(not global_settings.logo_customized):
+                    self.logo_credit_label.grid_remove()
+                self.logo_edit_button = tkinter.Button(self.logoframe, image=global_settings.editcat, relief='flat', borderwidth=0, padx=1, pady=1, command=self.change_logo)
+                self.logo_edit_button.image = global_settings.editcat
+                self.logo_edit_button.place(relx=1.0, y=4, x=-4, anchor='ne')
+                logo_edit_ttp = classes_general.CreateToolTip(self.logo_edit_button, "Alterar logo")
+            else:
+                self.labelpcp = tkinter.Label(self.logoframe, image=global_settings.tkphotologo2)
+                self.labelpcp.image = global_settings.tkphotologo2
+                self.labelpcp.grid(row=0, column=0, sticky='n')
             self.notebook = ttk.Notebook(self.infoFrame, padding=8)
             self.notebook.bind("<ButtonRelease-1>", self.tabOpened)
             self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_change)
@@ -3850,6 +4083,7 @@ class MainWindow():
             except Exception as ex:
                 None
             global_settings.docatual = fitz.open(global_settings.pathpdfatual)
+            self._ensure_pdf_zoom_state(global_settings.pathpdfatual)
             global_settings.zoom = global_settings.listaZooms[global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos]
             self.treeviewLocs.tag_configure('locationlp', background='#a1a1a1', font=global_settings.Font_tuple_ArialBoldUnderline_16)
             self.treeviewLocs.tag_configure('locationlpchild', background='#a1a1a1', font=global_settings.Font_tuple_ArialBold_14)
@@ -4190,6 +4424,7 @@ class MainWindow():
                             self.maiorw = global_settings.infoLaudo[global_settings.pathpdfatual].pixorgw*self.zoom_x *global_settings.zoom           
                         self.scrolly = round((global_settings.infoLaudo[global_settings.pathpdfatual].pixorgh*self.zoom_x*global_settings.zoom), 16)*global_settings.infoLaudo[global_settings.pathpdfatual].len  - 35
                         self.docInnerCanvas.config(scrollregion=(sobraEspaco, 0, sobraEspaco + (global_settings.infoLaudo[global_settings.pathpdfatual].pixorgw*global_settings.zoom*self.zoom_x), self.scrolly))
+                        self._ensure_pdf_zoom_state(global_settings.pathpdfatual, pdfantigo)
                         if(global_settings.infoLaudo[pdfantigo].zoom_pos!=global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos):
                             #global_settings.root.after(1, lambda: self.zoomx(None, None, pdfantigo))
                             self.zoomx(None, None, pdfantigo)
@@ -4477,6 +4712,7 @@ class MainWindow():
                                                          self.indiceposition += 1
                                                          if(self.indiceposition>=10):
                                                              self.indiceposition = 0
+                                                         self._ensure_pdf_zoom_state(global_settings.pathpdfatual, pdfantigo)
                                                          if(global_settings.infoLaudo[pdfantigo].zoom_pos!=global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos):
                                                              #global_settings.root.after(1, lambda: self.zoomx(None, None, pdfantigo))
                                                              self.zoomx(None, None, pdfantigo)
@@ -4503,7 +4739,12 @@ class MainWindow():
                                                      
                                                      filepath = str(Path(utilities_general.get_normalized_path(os.path.join(Path(utilities_general.get_normalized_path(pdfatualnorm)).parent,arquivo))))
                                                      try:
+                                                         archive_prompted = False
                                                          if(not os.path.exists(filepath)):
+                                                             resolved_filepath, archive_prompted = self.resolve_missing_external_link(filepath, arquivo)
+                                                             if(resolved_filepath is not None):
+                                                                 filepath = resolved_filepath
+                                                         if(not os.path.exists(filepath) and not archive_prompted):
                                                              utilities_general.popup_window(f'O arquivo não selecionado não existe, favor verifique: \n<{filepath}>', False)
                                                          
                                                          elif platform.system() == 'Darwin':       # macOS
@@ -4552,7 +4793,12 @@ class MainWindow():
                                                      pdfatualnorm = str(global_settings.pathpdfatual).replace("/","\\")                                                 
                                                  filepath = str(Path(utilities_general.get_normalized_path(os.path.join(Path(utilities_general.get_normalized_path(pdfatualnorm)).parent,arquivo))))
                                                  try:
+                                                     archive_prompted = False
                                                      if(not os.path.exists(filepath)):
+                                                         resolved_filepath, archive_prompted = self.resolve_missing_external_link(filepath, arquivo)
+                                                         if(resolved_filepath is not None):
+                                                             filepath = resolved_filepath
+                                                     if(not os.path.exists(filepath) and not archive_prompted):
                                                          utilities_general.popup_window(f'O arquivo não selecionado não existe, favor verifique: \n<{filepath}>', False)
                                                      elif platform.system() == 'Darwin':       # macOS
                                                          subprocess.call(('open', filepath), shell=True)
@@ -4777,6 +5023,7 @@ class MainWindow():
         #print(tag)
         quads_on_canvas = []
         try:
+            self._ensure_pdf_zoom_state(global_settings.pathpdfatual)
             global_settings.zoom = global_settings.listaZooms[global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos]
             global_settings.infoLaudo[global_settings.pathpdfatual].retangulosDesenhados[pagina] = {}            
             if(enhancetext):                
@@ -5357,6 +5604,7 @@ class MainWindow():
             utilities_general.printlogexception(ex=ex)
         
     def doubleClickSelection(self, evento):         
+         self._ensure_pdf_zoom_state(global_settings.pathpdfatual)
          global_settings.zoom = global_settings.listaZooms[global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos]
          if(isinstance(evento.widget, tkinter.Canvas)):
                 self.docInnerCanvas.delete("simplesearch")
@@ -5425,6 +5673,9 @@ class MainWindow():
     
     def zoomx(self, event=None, tipozoom='', pathpdfantigo = None, moveto = None):
         
+        self._ensure_pdf_zoom_state(global_settings.pathpdfatual, pathpdfantigo)
+        if(pathpdfantigo!=None):
+            self._ensure_pdf_zoom_state(pathpdfantigo, global_settings.pathpdfatual)
         if((tipozoom=='plus' and global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos < len(global_settings.listaZooms)-1) \
            or (tipozoom=='minus' and global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos > 0) or
            pathpdfantigo != None):
@@ -7221,6 +7472,7 @@ class MainWindow():
                     self.totalPgg.config(font=global_settings.Font_tuple_Arial_10, text="/ "+str(global_settings.infoLaudo[global_settings.pathpdfatual].len))                    
                     for pdf in global_settings.infoLaudo:
                         global_settings.infoLaudo[pdf].retangulosDesenhados = {}
+                    self._ensure_pdf_zoom_state(global_settings.pathpdfatual, pdfantigo)
                     if(global_settings.infoLaudo[pdfantigo].zoom_pos!=global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos):
                         #global_settings.root.after(1, lambda: self.zoomx(None, None, pdfantigo))
                         self.zoomx(None, None, pdfantigo)
@@ -7278,6 +7530,7 @@ class MainWindow():
                     self.totalPgg.config(font=global_settings.Font_tuple_Arial_10, text="/ "+str(global_settings.infoLaudo[global_settings.pathpdfatual].len))                    
                     for pdf in global_settings.infoLaudo:
                         global_settings.infoLaudo[pdf].retangulosDesenhados = {} 
+                    self._ensure_pdf_zoom_state(global_settings.pathpdfatual, pdfantigo)
                     if(global_settings.infoLaudo[pdfantigo].zoom_pos!=global_settings.infoLaudo[global_settings.pathpdfatual].zoom_pos):
                         #global_settings.root.after(1, lambda: self.zoomx(None, None, pdfantigo))
                         novoscroll = self.positions[temp][1]

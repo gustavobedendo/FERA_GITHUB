@@ -22,6 +22,7 @@ from threading import Thread
 import time, sys
 import traceback
 from dataclasses import dataclass
+import json
 
 @dataclass
 class IndexInfo:
@@ -46,7 +47,7 @@ class Processar():
         self.mb = mb
         self.md = md
         
-def build_db_with_reports_commandline(pathdb=None, reports=None):
+def build_db_with_reports_commandline(pathdb=None, reports=None, iped_latex_manifest=None):
     def cleanup_previous_reports(relpathdir):
         sqliteconn = utilities_general.connectDB(str(pathdb), 5)
         status = False
@@ -101,6 +102,7 @@ def build_db_with_reports_commandline(pathdb=None, reports=None):
         if(not createdb):
             print(f"Fail to create DB on {pathdb}")
             raise Exception()
+        register_iped_latex_manifest(pathdb, iped_latex_manifest)
         relpathdir = os.path.relpath(os.path.dirname(reports[0]), global_settings.pathdb.parent)
         if(cleanup_previous_reports(relpathdir)):
             for report in reports:
@@ -129,6 +131,114 @@ def build_db_with_reports_commandline(pathdb=None, reports=None):
         return status
 
 
+def register_iped_latex_manifest(pathdb, manifest_paths):
+    if(manifest_paths is None):
+        return
+    if(isinstance(manifest_paths, (str, os.PathLike))):
+        manifest_paths = [manifest_paths]
+    manifest_paths = [os.path.abspath(str(path)) for path in manifest_paths if str(path).strip() != ""]
+    if(not manifest_paths):
+        return
+    manifest_path = manifest_paths[0]
+    existing_manifests = [path for path in manifest_paths if os.path.isfile(path)]
+    if(not existing_manifests):
+        print(f"Manifesto IPED LaTeX não encontrado: {manifest_path}")
+        return
+    sqliteconn = utilities_general.connectDB(str(pathdb), 5)
+    if(sqliteconn is None):
+        return
+    try:
+        cursor = sqliteconn.cursor()
+        cursor.custom_execute("""
+            CREATE TABLE IF NOT EXISTS Anexo_Eletronico_Iped_Latex_Manifest (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                md5 TEXT,
+                stored_name TEXT,
+                logical_stored_name TEXT,
+                open_target TEXT,
+                backing_kind TEXT,
+                backing_path TEXT,
+                materialized_path TEXT,
+                storage_db TEXT,
+                storage_id TEXT,
+                name TEXT,
+                original_path TEXT,
+                source_manifest TEXT,
+                raw_json TEXT
+            )
+        """, None, False, False)
+        for column_name, column_type in (
+            ("logical_stored_name", "TEXT"),
+            ("open_target", "TEXT"),
+            ("backing_kind", "TEXT"),
+            ("backing_path", "TEXT"),
+            ("source_manifest", "TEXT"),
+        ):
+            try:
+                cursor.custom_execute(
+                    f"ALTER TABLE Anexo_Eletronico_Iped_Latex_Manifest ADD COLUMN {column_name} {column_type}",
+                    None,
+                    False,
+                    False,
+                )
+            except:
+                pass
+        cursor.custom_execute("DELETE FROM Anexo_Eletronico_Iped_Latex_Manifest", None, False, False)
+        rows = []
+        loaded_manifests = []
+        for manifest_path in existing_manifests:
+            loaded_manifests.append(manifest_path)
+            with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+                for line in manifest_file:
+                    line = line.strip()
+                    if(line == ""):
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except:
+                        continue
+                    locator = record.get("locator") or {}
+                    if(not locator and str(record.get("locatorType") or record.get("recordType") or "") in ("sqlite-storage-v1", "content-locator")):
+                        locator = record
+                    md5_value = str(record.get("md5") or locator.get("id") or record.get("id") or "").upper()
+                    logical_stored_name = str(record.get("logicalStoredName") or record.get("storedName") or "")
+                    open_target = str(record.get("openTarget") or "")
+                    backing_kind = str(record.get("backingKind") or record.get("locatorType") or "")
+                    backing_path = str(record.get("backingPath") or "")
+                    rows.append((
+                        md5_value,
+                        str(record.get("storedName") or ""),
+                        logical_stored_name,
+                        open_target,
+                        backing_kind,
+                        backing_path,
+                        str(record.get("materializedPath") or ""),
+                        str(locator.get("storageDb") or ""),
+                        str(locator.get("id") or md5_value).upper(),
+                        str(record.get("name") or ""),
+                        str(record.get("path") or ""),
+                        manifest_path,
+                        json.dumps(record, ensure_ascii=False),
+                    ))
+        if(rows):
+            cursor.custom_executemany("""
+                INSERT INTO Anexo_Eletronico_Iped_Latex_Manifest
+                (md5, stored_name, logical_stored_name, open_target, backing_kind, backing_path,
+                 materialized_path, storage_db, storage_id, name, original_path, source_manifest, raw_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, rows)
+        utilities_general._ensure_iped_latex_manifest_indexes(cursor)
+        sqliteconn.commit()
+        print(f"Manifestos IPED LaTeX registrados no FERA: {len(loaded_manifests)} arquivo(s), {len(rows)} itens")
+    except:
+        traceback.print_exc()
+    finally:
+        try:
+            sqliteconn.close()
+        except:
+            None
+
+
 
 def sairpdfdif(varok, valor, window):
         varok.set(valor)
@@ -154,7 +264,7 @@ def popup(window, varok, texto = 'Os arquivos não possuem HASH compatível.\n\n
         button_cancel.grid(row=1, column=0, pady=20)         
 
 class App():
-    def __init__(self, version, gotoviewer=False):
+    def __init__(self, version, gotoviewer=False, complemento=" -- Polícia Científica do Paraná"):
         self.root = tkinter.Toplevel()
         self.root.bind('<Control-Shift-L>', lambda e: global_settings.log_window.deiconify())
         self.root.protocol("WM_DELETE_WINDOW", lambda : global_settings.on_quit())
@@ -165,7 +275,8 @@ class App():
         utilities_general.center(self.root)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        self.root.title("FERA "+ self.version+" - Forensics Evidence Report Analyzer -- Polícia Científica do Paraná") 
+        print(complemento)
+        self.root.title("FERA "+ self.version+f" - Forensics Evidence Report Analyzer{complemento}")
         try:
             self.finalizados = 0
             self.paginasindexadas = 0
@@ -732,6 +843,10 @@ def iterateXREF_NamedDests(doc, xref, pismm, p3, p4, pnotmm, xreftopage, listax)
             folhas = p4.findall(doc.xref_object(int(xr)))
             
             for pageref, x, y in folhas:
+                # Some PDFs can keep stale named destinations pointing to
+                # page references that are no longer present in the page tree.
+                if(int(pageref) not in xreftopage):
+                    continue
                 #print(folhas, namedd, xreftopage[int(pageref)])
                 listax[namedd] = (xreftopage[int(pageref)], x, y)
 
@@ -830,14 +945,13 @@ def grabNamedDestinations(doc):
     p3 = re.compile(regex3)
     p4 = re.compile(regex4)
     pnotmm = re.compile(regexlimits)
-    pagexref = doc.page_xref(1)
     
     
     key = doc.xref_get_key(doc.pdf_catalog(), "Names")
     lista = {}
     try:
         chave = key[1].split(" ")[0]
-        if(chave == "null"): return
+        if(chave == "null"): return lista
         dests = doc.xref_get_key(int(chave), "Dests")
         #print(dests)
         if("xref" in key[0]):
@@ -918,6 +1032,7 @@ def addrel_commandLine(patpdf, indexinfo : IndexInfo = None):
                     else:
                         print(proc)
                 #time.sleep(5)
+                time.sleep(0.05)
         except:
             traceback.print_exc()
     try:
@@ -933,7 +1048,7 @@ def addrel_commandLine(patpdf, indexinfo : IndexInfo = None):
         doclen = len(doc)
         #doc.close()
         pdf = (patpdf, global_settings.default_margin_top, global_settings.default_margin_bottom, \
-               global_settings.default_margin_left, global_settings.default_margin_right, pixorg, doclen, utilities_general.get_eq_base(patpdf), 0)
+               global_settings.default_margin_left, global_settings.default_margin_right, pixorg, doclen, utilities_general.get_eq_base(patpdf), None)
             
         
         mt = pdf[1]
@@ -953,7 +1068,7 @@ def addrel_commandLine(patpdf, indexinfo : IndexInfo = None):
             pathpdf2 = str(patpdf)
             pathpdf2 = utilities_general.get_normalized_path(pathpdf2)
             eq = utilities_general.get_eq_base(pathpdf2)
-            cursor.custom_execute(insert_query_pdf, (relpathpdf, 0,tipo, mt, mb, me, md, int(pixorg.width), int(pixorg.height), doclen, eq, 0))
+            cursor.custom_execute(insert_query_pdf, (relpathpdf, 0,tipo, mt, mb, me, md, int(pixorg.width), int(pixorg.height), doclen, eq, None))
             print(f"Inserting {patpdf} to DB --> OK")
             mmtopxtop = math.floor(mt/25.4*72)
             mmtopxbottom = math.ceil(pixorg.height-(mb/25.4*72))
@@ -1034,6 +1149,7 @@ def addrel_commandLine(patpdf, indexinfo : IndexInfo = None):
             sqliteconn.commit()
             fim = 0  
             
+            global_settings.processar = mp.Queue()
             for i in range(global_settings.nthreads):
                 init = fim
                 fim = math.ceil((i+1) * (len(doc)/global_settings.nthreads))
@@ -1041,6 +1157,8 @@ def addrel_commandLine(patpdf, indexinfo : IndexInfo = None):
                 proc = Processar(idpdf, abs_path_pdf, os.path.basename(abs_path_pdf), init, min(fim, len(doc)), mt, mb, me, md)
                 #print()
                 global_settings.processar.put(proc)
+            for i in range(global_settings.nthreads):
+                global_settings.processar.put(None)
             #return 
             #print(global_settings.processar)
             insert_content= global_settings.manager.list()
@@ -1058,7 +1176,7 @@ def addrel_commandLine(patpdf, indexinfo : IndexInfo = None):
             global_settings.infoLaudo[pathpdf2].len = len(doc)
             global_settings.infoLaudo[pathpdf2].parent_alias = utilities_general.get_eq_base(pathpdf2)
            
-            global_settings.infoLaudo[pathpdf2].zoom_pos = 0
+            global_settings.infoLaudo[pathpdf2].zoom_pos = None
             global_settings.infoLaudo[pathpdf2].pixorgw = pixorg.width
             global_settings.infoLaudo[pathpdf2].pixorgh = pixorg.height
             #global_settings.infoLaudo[pathpdf2].paginasindexadas = 0
@@ -1072,7 +1190,7 @@ def addrel_commandLine(patpdf, indexinfo : IndexInfo = None):
             #    def __init__(self, idpdf, toc, lenpdf, pixorgw, pixorgh, mt, mb, me, md, paginasindexadas, rel_path_pdf, abs_path_pdf, tipo):
             relatorio_proxy = classes_general.RelatorioSuccint(idpdf, global_settings.infoLaudo[pathpdf2].toc, global_settings.infoLaudo[pathpdf2].len, \
                                                                pixorg.width, pixorg.height, mt, mb, me, md, 0, \
-                                                                   relpathpdf, pathpdf2, tipo, parent_alias)   
+                                                                    relpathpdf, pathpdf2, tipo, parent_alias)
             global_settings.listaRELS[pathpdf2] = relatorio_proxy
             for i in range(global_settings.nthreads):
                 
@@ -1221,7 +1339,7 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
                         
                         global_settings.infoLaudo[abs_path_pdf].parent_alias = r[12]
                         #print('v', global_settings.infoLaudo[abs_path_pdf].parent_alias)
-                        global_settings.infoLaudo[abs_path_pdf].zoom_pos = r[13]
+                        global_settings.infoLaudo[abs_path_pdf].zoom_pos = None if r[13] is None else int(r[13])
                         global_settings.infoLaudo[abs_path_pdf].mt = r[3]
                         global_settings.infoLaudo[abs_path_pdf].mb = r[4]
                         global_settings.infoLaudo[abs_path_pdf].me = r[5]
@@ -1272,7 +1390,7 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
                             doclen = len(doc)
                             doc.close()
                             pdf = (patpdf, global_settings.default_margin_top, global_settings.default_margin_bottom, \
-                                   global_settings.default_margin_left, global_settings.default_margin_right, pixorg, doclen, utilities_general.get_eq_base(patpdf), 0)
+                                   global_settings.default_margin_left, global_settings.default_margin_right, pixorg, doclen, utilities_general.get_eq_base(patpdf), None)
                         if(pdf==None):
                             print("ERRO")
                             continue
@@ -1282,7 +1400,7 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
                         md = pdf[4]
                         pixorg = pdf[5]
                         doclen = pdf[6]
-                        cursor.custom_execute(insert_query_pdf, (relpathpdf, 0,tipo, mt, mb, me, md, int(pixorg.width), int(pixorg.height), doclen, '', 0))
+                        cursor.custom_execute(insert_query_pdf, (relpathpdf, 0,tipo, mt, mb, me, md, int(pixorg.width), int(pixorg.height), doclen, '', None))
                         mmtopxtop = math.floor(mt/25.4*72)
                         mmtopxbottom = math.ceil(pixorg.height-(mb/25.4*72))
                         mmtopxleft = math.floor(me/25.4*72)
@@ -1355,7 +1473,7 @@ def addrels(tipo, view=None, pathpdfinput = None, pathdbext=None, rootx=None, sq
                             global_settings.infoLaudo[pathpdf2].len = len(doc)
                             global_settings.infoLaudo[pathpdf2].parent_alias = utilities_general.get_eq_base(pathpdf2)
                            
-                            global_settings.infoLaudo[pathpdf2].zoom_pos = 0
+                            global_settings.infoLaudo[pathpdf2].zoom_pos = None
                             global_settings.infoLaudo[pathpdf2].pixorgw = pixorg.width
                             global_settings.infoLaudo[pathpdf2].pixorgh = pixorg.height
                             #global_settings.infoLaudo[pathpdf2].paginasindexadas = 0
@@ -1550,7 +1668,7 @@ def createNewDbFile(toplevel=None, sqliteconnx=None):
             pixorgw INTEGER,
             pixorgh INTEGER,
             doclen INTEGER,
-            zoom_pos INTEGER DEFAULT 0,
+            zoom_pos INTEGER DEFAULT NULL,
             parent_alias TEXT DEFAULT '')
             '''
     
@@ -1725,7 +1843,8 @@ def createNewDbFile(toplevel=None, sqliteconnx=None):
                 
    
 class import_create_toplevel():
-    def __init__(self):
+    def __init__(self, complemento=" -- Polícia Científica do Paraná"):
+        self.complemento = complemento
         def solicitarDiretorio(toplevel):
             tipos = [('SQLite DB', '*.db')]
             path = (asksaveasfilename(filetypes=tipos, defaultextension=tipos))
@@ -1741,7 +1860,7 @@ class import_create_toplevel():
         toplevel.bind('<Control-Shift-L>', lambda e: global_settings.log_window.deiconify())
         toplevel.protocol("WM_DELETE_WINDOW", lambda : on_quit(toplevel))
         toplevel.geometry("600x600")
-        toplevel.title("FERA "+global_settings.version+" - Forensics Evidence Report Analyzer -- Polícia Científica do Paraná")
+        toplevel.title("FERA "+global_settings.version+" - Forensics Evidence Report Analyzer"+self.complemento)
         toplevel.columnconfigure(0, weight=1)
         toplevel.rowconfigure(0, weight=1)
         

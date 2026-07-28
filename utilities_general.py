@@ -8,18 +8,19 @@ Created on Tue Feb  1 13:52:40 2022
 import traceback
 try:
     import webview
-except:
-    traceback.print_exc()
+except ImportError:
+    webview = None
 import global_settings, utilities_general, classes_general, process_functions
 import sys, os
 
 from pathlib import Path
 import threading as thr
 import sqlite3
+import json
 import tkinter, math, re, fitz, time
 from PIL import Image, ImageTk, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-import hashlib, subprocess, platform
+import hashlib, subprocess, platform, gzip
 try:
     import win32clipboard
 except:
@@ -88,12 +89,16 @@ def popup_window(texto, sair):
 
 def show_locations(url, titulo, pid):
     #local_root = tkinter.Tk()
+    if(webview is None):
+        return False
     try:
         webview.create_window(f"P{pid} - {titulo}", url, width=1024, height=768, text_select=True)
         webview.start()
         print("webview started")
+        return True
     except Exception as ex:
         utilities_general.printlogexception(ex=ex)
+        return False
     #local_root.mainloop()
 
 #def log_window(texto):
@@ -258,11 +263,16 @@ def validate_new_db_columns(cursor, must_commit=False):
     except Exception as ex:
         None
     try:
-        addcolumn2 = "ALTER TABLE Anexo_Eletronico_Pdfs ADD COLUMN zoom_pos INTEGER DEFAULT 0"
+        addcolumn2 = "ALTER TABLE Anexo_Eletronico_Pdfs ADD COLUMN zoom_pos INTEGER DEFAULT NULL"
         cursor.custom_execute(addcolumn2, None, False, False)
         commit = True    
     except Exception as ex:
         None    
+    try:
+        if(_ensure_iped_latex_manifest_indexes(cursor)):
+            commit = True
+    except Exception as ex:
+        printlogexception(ex=ex)
     
     
         
@@ -466,6 +476,18 @@ def get_hashes_from_db():
         if(sqliteconn):
             sqliteconn.close()
     
+def reset_pdf_view_state_on_open(cursor):
+    try:
+        cursor.custom_execute(
+            "UPDATE Anexo_Eletronico_Pdfs SET lastpos = 0, zoom_pos = NULL WHERE IFNULL(lastpos, 0) != 0 OR zoom_pos IS NOT NULL",
+            None,
+            False,
+            False
+        )
+        return getattr(cursor, "rowcount", 0) > 0
+    except Exception as ex:
+        utilities_general.printlogexception(ex=ex)
+        return False
 
 def gather_information_fromdb(sqliteconn=None):    
     #doc = None  
@@ -482,6 +504,8 @@ def gather_information_fromdb(sqliteconn=None):
         update_db_version(sqliteconn, cursor)
     if(tocommit):
        sqliteconn.commit() 
+    if(reset_pdf_view_state_on_open(cursor)):
+       sqliteconn.commit()
     totalpaginas = 0
       
     select_all_pdfs = '''SELECT  P.id_pdf, P.rel_path_pdf, P.lastpos, P.tipo, P.margemsup, P.margeminf,
@@ -537,7 +561,7 @@ def gather_information_fromdb(sqliteconn=None):
                     utilities_general.printlogexception(ex=ex)
                 finally:
                     doc.close()
-            global_settings.infoLaudo[abs_path_pdf].zoom_pos = r[14]
+            global_settings.infoLaudo[abs_path_pdf].zoom_pos = None if r[14] is None else int(r[14])
             global_settings.infoLaudo[abs_path_pdf].mt = r[4]
             global_settings.infoLaudo[abs_path_pdf].mb = r[5]
             global_settings.infoLaudo[abs_path_pdf].me = r[6]
@@ -565,7 +589,7 @@ def gather_information_fromdb(sqliteconn=None):
                 global_settings.infoLaudo[abs_path_pdf].toc.append((toc[0], int(toc[1]), int(toc[2]), int(toc[3])))
             
             #    global_settings.listaRELS[abs_path_pdf] = (r[0], r[1], abs_path_pdf, (toc[0], int(toc[1]), int(toc[2]), int(toc[3])), 0) 
-            global_settings.infoLaudo[abs_path_pdf].ultimaPosicao=float(r[2])
+            global_settings.infoLaudo[abs_path_pdf].ultimaPosicao=0.0 if r[2] is None else float(r[2])
             global_settings.infoLaudo[abs_path_pdf].tipo = r[3]
             global_settings.infoLaudo[abs_path_pdf].id = r[0] 
             paginasindexadas = 0
@@ -1274,6 +1298,867 @@ def md5(path_pdf):
     digest = hash_md5.hexdigest()
     #print(path_pdf, digest)
     return digest
+
+def _safe_manifest_extract_name(name, md5_value):
+    clean = re.sub(r"[^A-Za-z0-9._-]+", "_", str(name or "").strip())
+    if(clean == ""):
+        clean = str(md5_value or "content")
+    return clean[:120]
+
+def _bundle_root_from_fera_db(pathdb):
+    db_parent = Path(pathdb).parent
+    if(db_parent.name.lower() == "fera"):
+        return db_parent.parent
+    return db_parent
+
+def _iped_equipment_roots(bundle_root):
+    roots = []
+    try:
+        iped_root = Path(bundle_root) / "IPED"
+        if(iped_root.is_dir()):
+            for child in iped_root.iterdir():
+                if(child.is_dir() and re.match(r"(?i)^Eq[0-9]{1,3}$", child.name)):
+                    roots.append(child)
+    except Exception as ex:
+        printlogexception(ex=ex)
+    return roots
+
+def _case_root_from_manifest_path(bundle_root, source_manifest):
+    try:
+        normalized = str(source_manifest or "").replace("\\", "/")
+        match = re.search(r"(?i)(?:^|/)IPED/(Eq[0-9]{1,3})(?:/|$)", normalized)
+        if(match is None):
+            return None
+        candidate = Path(bundle_root) / "IPED" / match.group(1)
+        if(candidate.is_dir()):
+            return candidate
+    except Exception as ex:
+        printlogexception(ex=ex)
+    return None
+
+def _candidate_manifest_paths(bundle_root, stored_name, materialized_path, open_target=None, backing_path=None):
+    candidates = []
+    for value in (open_target, backing_path, materialized_path, stored_name):
+        if(value is None or str(value).strip() == ""):
+            continue
+        normalized = str(value).replace("\\", "/").strip()
+        while(normalized.startswith("../")):
+            normalized = normalized[3:]
+        candidates.append(bundle_root / normalized.replace("/", os.sep))
+        candidates.append(bundle_root / "content" / normalized.replace("/", os.sep))
+        candidates.append(bundle_root / "IPED" / normalized.replace("/", os.sep))
+        candidates.append(bundle_root / "Exportados" / "arquivos" / os.path.basename(normalized))
+        candidates.append(bundle_root / "IPED" / "Exportados" / "arquivos" / os.path.basename(normalized))
+        for eq_root in _iped_equipment_roots(bundle_root):
+            candidates.append(eq_root / normalized.replace("/", os.sep))
+            candidates.append(eq_root / "content" / normalized.replace("/", os.sep))
+            candidates.append(eq_root / "Exportados" / "arquivos" / os.path.basename(normalized))
+        if(normalized.lower().startswith("exportados/")):
+            candidates.append(bundle_root / "content" / normalized.replace("/", os.sep))
+            candidates.append(bundle_root / "IPED" / normalized.replace("/", os.sep))
+            for eq_root in _iped_equipment_roots(bundle_root):
+                candidates.append(eq_root / normalized.replace("/", os.sep))
+    return candidates
+
+def _manifest_content_target(bundle_root, output_name, storage_id, case_root=None):
+    output_root = Path(case_root) if case_root is not None else Path(bundle_root)
+    output_dir = output_root / "Exportados" / "arquivos"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = _safe_manifest_extract_name(output_name, storage_id)
+    candidate = output_dir / safe_name
+    if(candidate.exists() and storage_id and str(storage_id).lower() not in candidate.name.lower()):
+        candidate = output_dir / (str(storage_id).lower() + "-" + safe_name)
+    return candidate
+
+def _validate_manifest_content(data, expected_md5=None, expected_size=None):
+    if(expected_size not in (None, "")):
+        try:
+            if(len(data) != int(expected_size)):
+                return False
+        except:
+            pass
+    if(expected_md5 not in (None, "")):
+        digest = hashlib.md5(data).hexdigest().upper()
+        if(digest != str(expected_md5).upper()):
+            return False
+    return True
+
+def _read_iped_storage_content(bundle_root, storage_db, storage_id, output_name, expected_md5=None, expected_size=None, case_root=None):
+    if(storage_db is None or str(storage_db).strip() == "" or storage_id is None or str(storage_id).strip() == ""):
+        return None
+    storage_db_text = str(storage_db).replace("\\", "/")
+    db_candidates = [
+        bundle_root / "content" / "IPED" / storage_db_text.replace("/", os.sep),
+        bundle_root / "content" / "IPED" / "storage" / os.path.basename(storage_db_text),
+        bundle_root / "content" / "IPED" / "iped" / "storage" / os.path.basename(storage_db_text),
+        bundle_root / "IPED" / storage_db_text.replace("/", os.sep),
+        bundle_root / "IPED" / "storage" / os.path.basename(storage_db_text),
+        # IPED's portable output keeps operational storage below IPED/iped.
+        # Keep the direct IPED/storage probes above for older bundles.
+        bundle_root / "IPED" / "iped" / "storage" / os.path.basename(storage_db_text),
+        bundle_root / storage_db_text.replace("/", os.sep),
+    ]
+    for eq_root in _iped_equipment_roots(bundle_root):
+        db_candidates.extend([
+            eq_root / storage_db_text.replace("/", os.sep),
+            eq_root / "storage" / os.path.basename(storage_db_text),
+            eq_root / "iped" / "storage" / os.path.basename(storage_db_text),
+            eq_root / "content" / storage_db_text.replace("/", os.sep),
+        ])
+    db_path = next((candidate for candidate in db_candidates if candidate.is_file()), None)
+    if(db_path is None):
+        return None
+    sqliteconn = None
+    try:
+        sqliteconn = connectDB(str(db_path), 5, maxrepeat=1)
+        if(sqliteconn is None):
+            return None
+        cursor = sqliteconn.cursor()
+        cursor.execute("SELECT data FROM t1 WHERE upper(id)=upper(?) AND data IS NOT NULL", (str(storage_id),))
+        row = cursor.fetchone()
+        if(row is None):
+            return None
+        data = gzip.decompress(row[0])
+        if(not _validate_manifest_content(data, expected_md5, expected_size)):
+            return None
+        output_path = _manifest_content_target(bundle_root, output_name, storage_id, case_root)
+        if(output_path.is_file()):
+            try:
+                existing = output_path.read_bytes()
+                if(_validate_manifest_content(existing, expected_md5, expected_size)):
+                    return str(output_path)
+            except:
+                pass
+        with open(output_path, "wb") as output_file:
+            output_file.write(data)
+        return str(output_path)
+    except Exception as ex:
+        printlogexception(ex=ex)
+        return None
+    finally:
+        try:
+            sqliteconn.close()
+        except:
+            None
+
+def _ensure_iped_latex_manifest_indexes(cursor):
+    try:
+        cursor.execute("""
+            SELECT 1
+              FROM sqlite_master
+             WHERE type = 'table'
+               AND name = 'Anexo_Eletronico_Iped_Latex_Manifest'
+        """)
+        if(cursor.fetchone() is None):
+            return False
+        existing_indexes = {
+            row[1]
+            for row in cursor.execute("PRAGMA index_list('Anexo_Eletronico_Iped_Latex_Manifest')").fetchall()
+        }
+        index_commands = (
+            ("idx_ael_manifest_md5_upper", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_md5_upper ON Anexo_Eletronico_Iped_Latex_Manifest(upper(md5))"),
+            ("idx_ael_manifest_stored_name", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_stored_name ON Anexo_Eletronico_Iped_Latex_Manifest(stored_name)"),
+            ("idx_ael_manifest_materialized_path", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_materialized_path ON Anexo_Eletronico_Iped_Latex_Manifest(materialized_path)"),
+            ("idx_ael_manifest_open_target", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_open_target ON Anexo_Eletronico_Iped_Latex_Manifest(open_target)"),
+            ("idx_ael_manifest_backing_path", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_backing_path ON Anexo_Eletronico_Iped_Latex_Manifest(backing_path)"),
+            ("idx_ael_manifest_name", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_name ON Anexo_Eletronico_Iped_Latex_Manifest(name)"),
+        )
+        created = False
+        for index_name, command in index_commands:
+            if(index_name in existing_indexes):
+                continue
+            cursor.execute(command)
+            created = True
+        return created
+    except Exception as ex:
+        printlogexception(ex=ex)
+        return False
+
+
+def _fetch_iped_latex_manifest_records(cursor, normalized_missing, basename, md5_lookup, select_columns, order_clause="ORDER BY id", limit=20, include_extended_paths=True):
+    records = []
+    if(md5_lookup not in (None, "")):
+        cursor.execute(f"""
+            SELECT {select_columns}
+              FROM Anexo_Eletronico_Iped_Latex_Manifest
+             WHERE upper(md5) = ?
+             {order_clause}
+             LIMIT {int(limit)}
+        """, (md5_lookup,))
+        records = cursor.fetchall()
+        if(records):
+            return records
+    if(include_extended_paths):
+        cursor.execute(f"""
+            SELECT {select_columns}
+              FROM Anexo_Eletronico_Iped_Latex_Manifest
+             WHERE stored_name = ?
+                OR materialized_path = ?
+                OR open_target = ?
+                OR backing_path = ?
+                OR name = ?
+             {order_clause}
+             LIMIT {int(limit)}
+        """, (
+            normalized_missing,
+            normalized_missing,
+            normalized_missing,
+            normalized_missing,
+            basename,
+        ))
+    else:
+        cursor.execute(f"""
+            SELECT {select_columns}
+              FROM Anexo_Eletronico_Iped_Latex_Manifest
+             WHERE stored_name = ?
+                OR materialized_path = ?
+                OR name = ?
+             {order_clause}
+             LIMIT {int(limit)}
+        """, (
+            normalized_missing,
+            normalized_missing,
+            basename,
+        ))
+    records = cursor.fetchall()
+    if(records):
+        return records
+    if(include_extended_paths):
+        cursor.execute(f"""
+            SELECT {select_columns}
+              FROM Anexo_Eletronico_Iped_Latex_Manifest
+             WHERE stored_name LIKE ?
+                OR materialized_path LIKE ?
+                OR open_target LIKE ?
+                OR backing_path LIKE ?
+             {order_clause}
+             LIMIT {int(limit)}
+        """, (
+            "%" + basename,
+            "%" + basename,
+            "%" + basename,
+            "%" + basename,
+        ))
+    else:
+        cursor.execute(f"""
+            SELECT {select_columns}
+              FROM Anexo_Eletronico_Iped_Latex_Manifest
+             WHERE stored_name LIKE ?
+                OR materialized_path LIKE ?
+             {order_clause}
+             LIMIT {int(limit)}
+        """, (
+            "%" + basename,
+            "%" + basename,
+        ))
+    return cursor.fetchall()
+
+
+def resolve_iped_latex_manifest_link(missing_path, pathdb, materialize_from_storage=True):
+    try:
+        if(pathdb is None or not Path(pathdb).is_file()):
+            return None
+        bundle_root = _bundle_root_from_fera_db(pathdb)
+        normalized_missing = str(missing_path).replace("\\", "/")
+        basename = os.path.basename(normalized_missing)
+        md5_match = re.search(r"(?i)(?:^|/)([a-f0-9]{32})(?:/|$)", normalized_missing)
+        md5_lookup = md5_match.group(1).upper() if md5_match is not None else ""
+        sqliteconn = connectDB(str(pathdb), 5, maxrepeat=1)
+        if(sqliteconn is None):
+            return None
+        try:
+            cursor = sqliteconn.cursor()
+            try:
+                records = _fetch_iped_latex_manifest_records(
+                    cursor,
+                    normalized_missing,
+                    basename,
+                    md5_lookup,
+                    "md5, stored_name, materialized_path, storage_db, storage_id, name, open_target, backing_path, raw_json, source_manifest",
+                )
+            except sqlite3.OperationalError:
+                records = _fetch_iped_latex_manifest_records(
+                    cursor,
+                    normalized_missing,
+                    basename,
+                    md5_lookup,
+                    "md5, stored_name, materialized_path, storage_db, storage_id, name, '' AS open_target, '' AS backing_path, raw_json, '' AS source_manifest",
+                    include_extended_paths=False,
+                )
+        except sqlite3.OperationalError:
+            return None
+        finally:
+            try:
+                sqliteconn.close()
+            except:
+                None
+        for md5_value, stored_name, materialized_path, storage_db, storage_id, name, open_target, backing_path, raw_json, source_manifest in records:
+            for candidate in _candidate_manifest_paths(bundle_root, stored_name, materialized_path, open_target, backing_path):
+                if(candidate.is_file()):
+                    return str(candidate)
+            expected_size = None
+            try:
+                record = json.loads(raw_json or '{}')
+                expected_size = record.get('size') or record.get('length') or record.get('fileSize')
+            except:
+                pass
+            case_root = _case_root_from_manifest_path(bundle_root, source_manifest)
+            if(materialize_from_storage):
+                extracted = _read_iped_storage_content(bundle_root, storage_db, storage_id or md5_value, name or basename, md5_value, expected_size, case_root)
+                if(extracted is not None and os.path.exists(extracted)):
+                    return extracted
+    except Exception as ex:
+        printlogexception(ex=ex)
+    return None
+
+
+def _seven_zip_executable():
+    """Return the 7-Zip executable shipped with FERA, if it is available."""
+    application_path = Path(get_application_path())
+    candidates = [
+        application_path / "7zip" / "7z.exe",
+        Path(__file__).resolve().parent / "third_party" / "7zip" / "7z.exe",
+    ]
+    for candidate in candidates:
+        if(candidate.is_file()):
+            return str(candidate)
+    return None
+
+
+def _normalize_archive_member(path):
+    normalized = str(path or "").replace("\\", "/").strip()
+    while(normalized.startswith("./")):
+        normalized = normalized[2:]
+    if(normalized == "" or normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized)):
+        return None
+    parts = [part for part in normalized.split("/") if part not in ("", ".")]
+    if(not parts or any(part == ".." for part in parts)):
+        return None
+    return "/".join(parts)
+
+
+def _normalize_archive_reference(path):
+    normalized = str(path or "").replace("\\", "/").strip()
+    while(normalized.startswith("./")):
+        normalized = normalized[2:]
+    while(normalized.startswith("../")):
+        normalized = normalized[3:]
+    return _normalize_archive_member(normalized)
+
+
+def _path_is_within(path, root):
+    try:
+        return os.path.commonpath((str(Path(path).resolve()), str(Path(root).resolve()))) == str(Path(root).resolve())
+    except:
+        return False
+
+
+def _add_archive_member_candidate(candidates, value):
+    normalized = _normalize_archive_member(value)
+    if(normalized is None):
+        normalized = _normalize_archive_reference(value)
+    if(normalized is not None and normalized not in candidates):
+        candidates.append(normalized)
+    return normalized
+
+
+def _iped_case_archive_prefixes(bundle_root):
+    prefixes = []
+    try:
+        root = Path(bundle_root)
+        # Current portable bundles carry their own canonical root (REP-Anexo
+        # or REP-EqNN-Anexo).  Older bundles may have used Anexo or a variable
+        # outer directory, so retain all non-duplicated candidates below.
+        if(root.name.lower() == "anexo" or root.name.lower().endswith("-anexo")):
+            prefixes.append(root.name)
+        if("Anexo" not in prefixes):
+            prefixes.append("Anexo")
+        for path in (root, *root.parents):
+            if(re.match(r"^\d+-\d+$", path.name)):
+                prefix = f"{path.name}-Anexo"
+                if(prefix not in prefixes):
+                    prefixes.append(prefix)
+                break
+    except:
+        pass
+    return prefixes
+
+
+def _archive_member_candidates(missing_path, bundle_root, link_reference=None):
+    candidates = []
+    for value in (link_reference,):
+        _add_archive_member_candidate(candidates, value)
+    try:
+        relative = os.path.relpath(str(missing_path), str(bundle_root))
+        relative = _add_archive_member_candidate(candidates, relative)
+        if(relative is not None):
+            for prefix in _iped_case_archive_prefixes(bundle_root):
+                _add_archive_member_candidate(candidates, f"{prefix}/{relative}")
+    except:
+        None
+    return candidates
+
+
+def _fallback_materialization_target(missing_path, bundle_root, link_reference=None):
+    target_path = Path(missing_path)
+    if(_path_is_within(target_path, bundle_root)):
+        return target_path
+    for value in (link_reference, missing_path):
+        normalized = _normalize_archive_reference(value)
+        basename = os.path.basename(normalized or str(value).replace("\\", "/"))
+        if(basename == ""):
+            continue
+        lower = (normalized or "").lower()
+        if(lower.startswith("iped/exportados/") or lower.startswith("exportados/")):
+            candidate = Path(bundle_root) / normalized.replace("/", os.sep)
+        else:
+            candidate = Path(bundle_root) / "Exportados" / "arquivos" / basename
+        if(_path_is_within(candidate, bundle_root)):
+            return candidate
+    return None
+
+
+def _add_manifest_archive_candidates(candidates, bundle_root, value):
+    """Add the archive locations a direct-LaTeX manifest can describe.
+
+    Validador intentionally omits Exportados and report ``files`` payloads.
+    Their canonical copies remain in the main Anexo, so a missing PDF link
+    must be translated from manifest metadata to the corresponding member of
+    that archive before it can be materialized back to its linked location.
+    """
+    normalized = _normalize_archive_member(value)
+    if(normalized is None):
+        return
+    variants = [normalized]
+    if(not normalized.lower().startswith("exportados/")):
+        variants.append("Exportados/" + normalized)
+    if(not normalized.lower().startswith("iped/")):
+        variants.append("IPED/" + normalized)
+    if(not normalized.lower().startswith("iped/exportados/")):
+        variants.append("IPED/Exportados/" + normalized)
+    basename = os.path.basename(normalized)
+    if(basename):
+        variants.append("IPED/Exportados/arquivos/" + basename)
+    for eq_root in _iped_equipment_roots(bundle_root):
+        eq_prefix = "IPED/" + eq_root.name
+        if(not normalized.lower().startswith((eq_prefix + "/").lower())):
+            variants.append(eq_prefix + "/" + normalized)
+        if(not normalized.lower().startswith("exportados/")):
+            variants.append(eq_prefix + "/Exportados/" + normalized)
+        if(basename):
+            variants.append(eq_prefix + "/Exportados/arquivos/" + basename)
+    prefixes = _iped_case_archive_prefixes(bundle_root)
+    for variant in variants:
+        candidate = _add_archive_member_candidate(candidates, variant)
+        if(candidate is not None):
+            for prefix in prefixes:
+                _add_archive_member_candidate(candidates, f"{prefix}/{candidate}")
+
+
+def _manifest_archive_member_candidates(pathdb, missing_path, bundle_root):
+    """Return archive-member candidates for the manifest record matching a link."""
+    candidates = []
+    try:
+        normalized_missing = str(missing_path).replace("\\", "/")
+        basename = os.path.basename(normalized_missing)
+        md5_match = re.search(r"(?i)(?:^|/)([a-f0-9]{32})(?:/|$)", normalized_missing)
+        md5_lookup = md5_match.group(1).upper() if md5_match is not None else ""
+        sqliteconn = connectDB(str(pathdb), 5, maxrepeat=1)
+        if(sqliteconn is None):
+            return candidates
+        try:
+            cursor = sqliteconn.cursor()
+            cursor.execute("""
+                SELECT 1
+                  FROM sqlite_master
+                 WHERE type = 'table'
+                   AND name = 'Anexo_Eletronico_Iped_Latex_Manifest'
+            """)
+            if(cursor.fetchone() is None):
+                return candidates
+            try:
+                records = _fetch_iped_latex_manifest_records(
+                    cursor,
+                    normalized_missing,
+                    basename,
+                    md5_lookup,
+                    "stored_name, materialized_path, open_target, backing_path, raw_json",
+                    order_clause="ORDER BY id",
+                )
+            except sqlite3.OperationalError:
+                records = _fetch_iped_latex_manifest_records(
+                    cursor,
+                    normalized_missing,
+                    basename,
+                    md5_lookup,
+                    "stored_name, materialized_path, '' AS open_target, '' AS backing_path, raw_json",
+                    order_clause="ORDER BY id",
+                    include_extended_paths=False,
+                )
+        finally:
+            try:
+                sqliteconn.close()
+            except:
+                None
+        for stored_name, materialized_path, open_target, backing_path, raw_json in records:
+            values = [stored_name, materialized_path, open_target, backing_path]
+            try:
+                record = json.loads(raw_json or "{}")
+                values.extend([
+                    record.get("logicalStoredName"), record.get("storedName"),
+                    record.get("materializedPath"), record.get("openTarget"),
+                    record.get("backingPath"),
+                ])
+            except:
+                pass
+            for value in values:
+                _add_manifest_archive_candidates(candidates, bundle_root, value)
+    except Exception as ex:
+        printlogexception(ex=ex)
+    return candidates
+
+
+def _manifest_materialization_target(pathdb, missing_path, bundle_root):
+    """Choose a safe in-bundle destination for a legacy external PDF link.
+
+    Reports produced before the portable layout could contain paths such as
+    ``../../../Exportados/...``.  Once their PDF is published below
+    ``RelatoriosPDF``, that relative target escapes the bundle.  Never write
+    there: use the manifest's canonical IPED/Exportados location instead.
+    """
+    target_path = Path(missing_path)
+    if(_path_is_within(target_path, bundle_root)):
+        return target_path
+    try:
+        normalized_missing = str(missing_path).replace("\\", "/")
+        basename = os.path.basename(normalized_missing)
+        md5_match = re.search(r"(?i)(?:^|/)([a-f0-9]{32})(?:/|$)", normalized_missing)
+        md5_lookup = md5_match.group(1).upper() if md5_match is not None else ""
+        sqliteconn = connectDB(str(pathdb), 5, maxrepeat=1)
+        if(sqliteconn is None):
+            return None
+        try:
+            cursor = sqliteconn.cursor()
+            cursor.execute("""
+                SELECT 1
+                  FROM sqlite_master
+                 WHERE type = 'table'
+                   AND name = 'Anexo_Eletronico_Iped_Latex_Manifest'
+            """)
+            if(cursor.fetchone() is None):
+                return None
+            try:
+                records = _fetch_iped_latex_manifest_records(
+                    cursor,
+                    normalized_missing,
+                    basename,
+                    md5_lookup,
+                    "materialized_path, backing_path, stored_name, source_manifest",
+                    order_clause="ORDER BY id",
+                )
+            except sqlite3.OperationalError:
+                records = _fetch_iped_latex_manifest_records(
+                    cursor,
+                    normalized_missing,
+                    basename,
+                    md5_lookup,
+                    "materialized_path, '' AS backing_path, stored_name, '' AS source_manifest",
+                    order_clause="ORDER BY id",
+                    include_extended_paths=False,
+                )
+        finally:
+            try:
+                sqliteconn.close()
+            except:
+                None
+        for materialized_path, backing_path, stored_name, source_manifest in records:
+            case_root = _case_root_from_manifest_path(bundle_root, source_manifest)
+            for value in (backing_path, materialized_path, stored_name):
+                normalized = _normalize_archive_member(value)
+                if(normalized is None):
+                    continue
+                lower = normalized.lower()
+                if(case_root is not None):
+                    if(lower.startswith("exportados/")):
+                        candidate = case_root / normalized.replace("/", os.sep)
+                    elif(lower.startswith("iped/")):
+                        candidate = Path(bundle_root) / normalized.replace("/", os.sep)
+                    else:
+                        candidate = case_root / "Exportados" / "arquivos" / os.path.basename(normalized)
+                elif(lower.startswith("iped/exportados/")):
+                    candidate = Path(bundle_root) / normalized.replace("/", os.sep)
+                elif(lower.startswith("exportados/")):
+                    candidate = Path(bundle_root) / normalized.replace("/", os.sep)
+                else:
+                    candidate = Path(bundle_root) / "Exportados" / "arquivos" / os.path.basename(normalized)
+                if(_path_is_within(candidate, bundle_root)):
+                    return candidate
+    except Exception as ex:
+        printlogexception(ex=ex)
+    return None
+
+
+def _list_7zip_members(seven_zip, archive_path):
+    """Read 7-Zip's technical listing without extracting archive contents."""
+    try:
+        completed = subprocess.run(
+            [seven_zip, "l", "-slt", str(archive_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if(completed.returncode != 0):
+            return []
+        entries = []
+        current = {}
+        for line in completed.stdout.splitlines():
+            if(line.strip() == ""):
+                if("Path" in current):
+                    entries.append(current)
+                current = {}
+                continue
+            if(" = " in line):
+                key, value = line.split(" = ", 1)
+                current[key.strip()] = value.strip()
+        if("Path" in current):
+            entries.append(current)
+        # The first record describes the archive itself, not a member.
+        return entries[1:] if entries else []
+    except Exception as ex:
+        printlogexception(ex=ex)
+        return []
+
+
+_IPED_ARCHIVE_SOURCES = {}
+_IPED_MATERIALIZED_LINKS = {}
+
+
+def _remember_iped_archive_source(pathdb, bundle_root, archive_path):
+    try:
+        archive = Path(archive_path).resolve()
+        stat = archive.stat()
+        bundle_key = str(Path(bundle_root).resolve())
+        archive_record = (str(archive), stat.st_size, stat.st_mtime_ns)
+        sources = _IPED_ARCHIVE_SOURCES.setdefault(bundle_key, [])
+        sources[:] = [source for source in sources if(source[0] != archive_record[0])]
+        sources.insert(0, archive_record)
+    except Exception as ex:
+        printlogexception(ex=ex)
+
+
+def _known_iped_archive_sources(pathdb, bundle_root):
+    sources = []
+    try:
+        bundle_key = str(Path(bundle_root).resolve())
+        valid_records = []
+        for archive_path, archive_size, archive_mtime_ns in _IPED_ARCHIVE_SOURCES.get(bundle_key, []):
+            try:
+                stat = Path(archive_path).stat()
+                if(stat.st_size == archive_size and stat.st_mtime_ns == archive_mtime_ns):
+                    sources.append(archive_path)
+                    valid_records.append((archive_path, archive_size, archive_mtime_ns))
+            except:
+                None
+        _IPED_ARCHIVE_SOURCES[bundle_key] = valid_records
+    except Exception as ex:
+        printlogexception(ex=ex)
+    return sources
+
+
+def _materialized_link_key(bundle_root, missing_path, link_reference=None):
+    normalized_link = _normalize_archive_member(link_reference) or ""
+    try:
+        normalized_missing = str(Path(missing_path).resolve())
+    except:
+        normalized_missing = str(missing_path)
+    return (str(Path(bundle_root).resolve()), normalized_missing.casefold(), normalized_link.casefold())
+
+
+def _remember_materialized_link(bundle_root, missing_path, link_reference, materialized_path):
+    try:
+        _IPED_MATERIALIZED_LINKS[_materialized_link_key(bundle_root, missing_path, link_reference)] = str(Path(materialized_path).resolve())
+    except Exception as ex:
+        printlogexception(ex=ex)
+
+
+def _known_materialized_link(bundle_root, missing_path, link_reference=None):
+    try:
+        candidate = _IPED_MATERIALIZED_LINKS.get(_materialized_link_key(bundle_root, missing_path, link_reference))
+        if(candidate is not None and Path(candidate).is_file()):
+            return candidate
+    except Exception as ex:
+        printlogexception(ex=ex)
+    return None
+
+
+def _select_archive_member(entries, wanted_members):
+    wanted_by_casefold = {member.casefold(): member for member in wanted_members}
+    normalized_entries = []
+    for entry in entries:
+        entry_path = _normalize_archive_member(entry.get("Path"))
+        if(entry_path is None or entry.get("Folder", "-") != "-"):
+            continue
+        normalized_entries.append(entry_path)
+        if(entry_path.casefold() in wanted_by_casefold):
+            return entry_path
+
+    for entry_path in normalized_entries:
+        entry_casefold = entry_path.casefold()
+        for wanted in wanted_members:
+            wanted_casefold = wanted.casefold()
+            if(entry_casefold.endswith("/" + wanted_casefold)):
+                return entry_path
+
+    basename_matches = {}
+    wanted_basenames = {os.path.basename(member).casefold() for member in wanted_members if(os.path.basename(member) != "")}
+    for entry_path in normalized_entries:
+        basename = os.path.basename(entry_path).casefold()
+        if(basename in wanted_basenames):
+            basename_matches.setdefault(basename, []).append(entry_path)
+    for matches in basename_matches.values():
+        if(len(matches) == 1):
+            return matches[0]
+    return None
+
+
+def materialize_iped_archive_link(missing_path, pathdb, archive_path=None, link_reference=None, progress_callback=None):
+    """Extract one PDF-linked file from a known ZIP/ZIP.001 into the bundle.
+
+    When ``archive_path`` is omitted, sources successfully selected earlier in
+    this FERA execution for the same bundle are tried. Legacy paths outside the
+    bundle are translated through the manifest to IPED/Exportados; the returned
+    path is always the file that was materialized successfully.
+    """
+    def report(message):
+        if(progress_callback is None):
+            return
+        try:
+            progress_callback(message)
+        except:
+            pass
+
+    try:
+        report("Iniciando materializacao do arquivo solicitado pelo PDF.")
+        report(f"Caminho solicitado pelo PDF: {missing_path}")
+        if(link_reference not in (None, "")):
+            report(f"Referencia registrada no link: {link_reference}")
+        if(pathdb is None or not Path(pathdb).is_file()):
+            report(f"Banco do caso nao localizado: {pathdb}")
+            report("Materializacao cancelada.")
+            return None
+        report(f"Banco do caso: {pathdb}")
+        requested_path = Path(missing_path)
+        if(requested_path.is_file()):
+            report(f"O arquivo ja existe no caminho esperado: {requested_path}")
+            return str(requested_path)
+        report("Localizando a pasta raiz do anexo do caso.")
+        bundle_root = _bundle_root_from_fera_db(pathdb)
+        report(f"Pasta raiz considerada para o anexo: {bundle_root}")
+        materialized_link = _known_materialized_link(bundle_root, requested_path, link_reference)
+        if(materialized_link is not None):
+            report(f"Arquivo ja materializado nesta sessao: {materialized_link}")
+            return materialized_link
+        report("Consultando manifesto IPED LaTeX.")
+        manifest_path = resolve_iped_latex_manifest_link(requested_path, pathdb, materialize_from_storage=True)
+        if(manifest_path is not None and Path(manifest_path).is_file()):
+            _remember_materialized_link(bundle_root, requested_path, link_reference, manifest_path)
+            report(f"Arquivo localizado/materializado pelo manifesto: {manifest_path}")
+            return manifest_path
+        report("Conferindo onde o arquivo deve ser gravado dentro do caso.")
+        target_path = _manifest_materialization_target(pathdb, requested_path, bundle_root)
+        if(target_path is None):
+            target_path = _fallback_materialization_target(requested_path, bundle_root, link_reference)
+        if(target_path is None):
+            report("Nao foi possivel definir um destino seguro para materializar o arquivo.")
+            return None
+        report(f"Extraindo para: {target_path}")
+        report("Localizando o 7-Zip usado para ler o anexo.")
+        seven_zip = _seven_zip_executable()
+        if(seven_zip is None):
+            report("7-Zip nao encontrado. Nao foi possivel extrair o anexo.")
+            return None
+        report(f"7-Zip encontrado em: {seven_zip}")
+        archive_sources = [archive_path] if archive_path else _known_iped_archive_sources(pathdb, bundle_root)
+        if(archive_sources):
+            report(f"Anexos candidatos: {len(archive_sources)}.")
+        else:
+            report("Nenhum anexo ZIP conhecido para tentar automaticamente.")
+        wanted_members = []
+        for candidate_path in (requested_path, target_path):
+            for member in _archive_member_candidates(candidate_path, bundle_root, link_reference):
+                if(member not in wanted_members):
+                    wanted_members.append(member)
+        for member in _manifest_archive_member_candidates(pathdb, target_path, bundle_root):
+            if(member not in wanted_members):
+                wanted_members.append(member)
+        if(not wanted_members):
+            report("Nao foram encontrados nomes candidatos dentro do anexo.")
+            return None
+        report(f"Procurando {len(wanted_members)} caminho(s) possivel(is) dentro do ZIP.")
+        for index, candidate in enumerate(wanted_members[:5], start=1):
+            report(f"Candidato {index}: {candidate}")
+        if(len(wanted_members) > 5):
+            report(f"... mais {len(wanted_members) - 5} candidato(s).")
+        for source in archive_sources:
+            try:
+                archive = Path(source)
+                report(f"Verificando anexo ZIP: {archive}")
+                if(not archive.is_file()):
+                    report(f"Anexo informado nao foi encontrado no disco: {archive}")
+                    continue
+                member = None
+                report("Lendo a lista de arquivos do anexo. Em anexos grandes isso pode demorar.")
+                entries = _list_7zip_members(seven_zip, archive)
+                report(f"Itens lidos no anexo: {len(entries)}.")
+                member = _select_archive_member(entries, wanted_members)
+                if(member is None):
+                    report("Arquivo solicitado nao foi encontrado neste anexo.")
+                    continue
+                report(f"Caminho encontrado dentro do ZIP: {member}")
+                report(f"Preparando pasta de destino: {target_path.parent}")
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                temporary_path = target_path.with_name(target_path.name + ".fera-materializing")
+                try:
+                    report(f"Arquivo temporario: {temporary_path}")
+                    report(f"Extraindo do ZIP: {archive}")
+                    report(f"Extraindo item interno: {member}")
+                    report(f"Extraindo para: {target_path}")
+                    with open(temporary_path, "wb") as output_file:
+                        completed = subprocess.run(
+                            [seven_zip, "x", "-y", "-so", str(archive), member],
+                            stdin=subprocess.DEVNULL,
+                            stdout=output_file,
+                            stderr=subprocess.PIPE,
+                            check=False,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                        )
+                    if(completed.returncode != 0 or not temporary_path.is_file()):
+                        report(f"A extracao falhou para este anexo. Codigo de retorno: {completed.returncode}")
+                        temporary_path.unlink(missing_ok=True)
+                        continue
+                    report(f"Gravando arquivo materializado em: {target_path}")
+                    os.replace(temporary_path, target_path)
+                    _remember_iped_archive_source(pathdb, bundle_root, archive)
+                    _remember_materialized_link(bundle_root, requested_path, link_reference, target_path)
+                    report(f"Materializacao concluida: {target_path}")
+                    return str(target_path)
+                finally:
+                    try:
+                        temporary_path.unlink(missing_ok=True)
+                    except:
+                        None
+            except Exception as ex:
+                report("Ocorreu um erro ao processar este anexo.")
+                printlogexception(ex=ex)
+    except Exception as ex:
+        report("Ocorreu um erro durante a materializacao.")
+        printlogexception(ex=ex)
+    report("Arquivo nao materializado.")
+    return None
                 
 def searchsqlite(tipobusca, termo, pathpdf, pathdb, idpdf, simplesearch = False, queuesair = None, \
                  idtermo = None, idtermopdf = None, erros_queue = None, fixo = None, result_queue = None,\

@@ -20,12 +20,13 @@ def start_up_app():
     sqliteconn = None
     try:
         if(len(sys.argv) == 1): 
-            indexador_fera.import_create_toplevel()            
+            indexador_fera.import_create_toplevel(complemento="")            
             if(global_settings.pathdb == None):
                 return  
             else:
                 sys.argv.append(str(global_settings.pathdb))
         global_settings.splash_window = classes_general.Splash_window(global_settings.root)
+        global_settings.root.title("FERA "+global_settings.version+" - Forensics Evidence Report Analyzer")
         if(len(sys.argv) >= 2): 
             filename, extension = os.path.splitext(sys.argv[1])
             if(".pdf" == extension.lower()):
@@ -128,7 +129,7 @@ def wait_to_open():
     if(global_settings.finished_gathering_info):
         if(not gotoviewer):
             global_settings.splash_window.window.withdraw()
-            indexador_fera.App(global_settings.version, gotoviewer)
+            indexador_fera.App(global_settings.version, gotoviewer, complemento="")
         if(global_settings.pathdb==None):
             return
         global_settings.initiate_processes()
@@ -157,7 +158,7 @@ if __name__ == '__main__':
         reports = []
         status = 1
         shortcut = False
-        iped_latex_manifests = []
+        iped_latex_manifest = None
         pathdbparent = ""
         print(sys.argv)
         for currentArgument, currentValue in arguments:
@@ -182,7 +183,7 @@ if __name__ == '__main__':
                                                         eqrelatoriosplit[2],
                                                         eqrelatoriosplit[3:]))
             if currentArgument in ("--iped-latex-manifest"):
-                iped_latex_manifests.append(currentValue)
+                iped_latex_manifest = currentValue
                 
                 
                 
@@ -204,11 +205,13 @@ if __name__ == '__main__':
                 shutil.copy(os.path.join(utilities_general.get_application_path(), "FERA_CALLERS", "FERA-Windows.exe"), os.path.dirname(sys.argv[2]))
                 shutil.copy(os.path.join(utilities_general.get_application_path(), "FERA_CALLERS", "FERA-Linux.sh"), os.path.dirname(sys.argv[2]))
                 shutil.copy(os.path.join(utilities_general.get_application_path(), "FERA_CALLERS", "FERA.pdf"), os.path.dirname(sys.argv[2]))
-            status = indexador_fera.build_db_with_reports_commandline(pathdb, reports, iped_latex_manifests)
+            status = indexador_fera.build_db_with_reports_commandline(pathdb, reports, iped_latex_manifest)
             
             
         else:
             global_settings.initiate_variables()
+            global_settings.external_logo_enabled = True
+            global_settings.root.title("FERA "+global_settings.version+" - Forensics Evidence Report Analyzer -- Polícia Científica do Paraná")
             start_up_app()
     except Exception as ex:
         if(commandline):
