@@ -1387,24 +1387,39 @@ def _read_iped_storage_content(bundle_root, storage_db, storage_id, output_name,
     if(storage_db is None or str(storage_db).strip() == "" or storage_id is None or str(storage_id).strip() == ""):
         return None
     storage_db_text = str(storage_db).replace("\\", "/")
-    db_candidates = [
-        bundle_root / "content" / "IPED" / storage_db_text.replace("/", os.sep),
-        bundle_root / "content" / "IPED" / "storage" / os.path.basename(storage_db_text),
-        bundle_root / "content" / "IPED" / "iped" / "storage" / os.path.basename(storage_db_text),
-        bundle_root / "IPED" / storage_db_text.replace("/", os.sep),
-        bundle_root / "IPED" / "storage" / os.path.basename(storage_db_text),
-        # IPED's portable output keeps operational storage below IPED/iped.
-        # Keep the direct IPED/storage probes above for older bundles.
-        bundle_root / "IPED" / "iped" / "storage" / os.path.basename(storage_db_text),
-        bundle_root / storage_db_text.replace("/", os.sep),
-    ]
-    for eq_root in _iped_equipment_roots(bundle_root):
-        db_candidates.extend([
-            eq_root / storage_db_text.replace("/", os.sep),
-            eq_root / "storage" / os.path.basename(storage_db_text),
-            eq_root / "iped" / "storage" / os.path.basename(storage_db_text),
-            eq_root / "content" / storage_db_text.replace("/", os.sep),
-        ])
+    storage_name = os.path.basename(storage_db_text)
+    scoped_case_root = Path(case_root) if case_root is not None else None
+    if(scoped_case_root is not None and scoped_case_root.is_dir()):
+        # A report/manifest identifies its equipment.  All equipment modules use
+        # names such as storage-0.db through storage-15.db, so scanning other
+        # Eq folders can select a valid but unrelated database.
+        db_candidates = [
+            scoped_case_root / storage_db_text.replace("/", os.sep),
+            scoped_case_root / "storage" / storage_name,
+            scoped_case_root / "iped" / "storage" / storage_name,
+            scoped_case_root / "content" / storage_db_text.replace("/", os.sep),
+        ]
+    else:
+        # Legacy manifests without a report/equipment context retain the
+        # package-wide fallback lookup.
+        db_candidates = [
+            bundle_root / "content" / "IPED" / storage_db_text.replace("/", os.sep),
+            bundle_root / "content" / "IPED" / "storage" / storage_name,
+            bundle_root / "content" / "IPED" / "iped" / "storage" / storage_name,
+            bundle_root / "IPED" / storage_db_text.replace("/", os.sep),
+            bundle_root / "IPED" / "storage" / storage_name,
+            # IPED's portable output keeps operational storage below IPED/iped.
+            # Keep the direct IPED/storage probes above for older bundles.
+            bundle_root / "IPED" / "iped" / "storage" / storage_name,
+            bundle_root / storage_db_text.replace("/", os.sep),
+        ]
+        for eq_root in _iped_equipment_roots(bundle_root):
+            db_candidates.extend([
+                eq_root / storage_db_text.replace("/", os.sep),
+                eq_root / "storage" / storage_name,
+                eq_root / "iped" / "storage" / storage_name,
+                eq_root / "content" / storage_db_text.replace("/", os.sep),
+            ])
     db_path = next((candidate for candidate in db_candidates if candidate.is_file()), None)
     if(db_path is None):
         return None
@@ -1456,12 +1471,7 @@ def _ensure_iped_latex_manifest_indexes(cursor):
             for row in cursor.execute("PRAGMA index_list('Anexo_Eletronico_Iped_Latex_Manifest')").fetchall()
         }
         index_commands = (
-            ("idx_ael_manifest_md5_upper", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_md5_upper ON Anexo_Eletronico_Iped_Latex_Manifest(upper(md5))"),
-            ("idx_ael_manifest_stored_name", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_stored_name ON Anexo_Eletronico_Iped_Latex_Manifest(stored_name)"),
-            ("idx_ael_manifest_materialized_path", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_materialized_path ON Anexo_Eletronico_Iped_Latex_Manifest(materialized_path)"),
-            ("idx_ael_manifest_open_target", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_open_target ON Anexo_Eletronico_Iped_Latex_Manifest(open_target)"),
-            ("idx_ael_manifest_backing_path", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_backing_path ON Anexo_Eletronico_Iped_Latex_Manifest(backing_path)"),
-            ("idx_ael_manifest_name", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_name ON Anexo_Eletronico_Iped_Latex_Manifest(name)"),
+            ("idx_ael_manifest_md5_nocase", "CREATE INDEX IF NOT EXISTS idx_ael_manifest_md5_nocase ON Anexo_Eletronico_Iped_Latex_Manifest(md5 COLLATE NOCASE)"),
         )
         created = False
         for index_name, command in index_commands:
@@ -1481,7 +1491,7 @@ def _fetch_iped_latex_manifest_records(cursor, normalized_missing, basename, md5
         cursor.execute(f"""
             SELECT {select_columns}
               FROM Anexo_Eletronico_Iped_Latex_Manifest
-             WHERE upper(md5) = ?
+             WHERE md5 = ? COLLATE NOCASE
              {order_clause}
              LIMIT {int(limit)}
         """, (md5_lookup,))
@@ -1603,6 +1613,11 @@ def resolve_iped_latex_manifest_link(missing_path, pathdb, materialize_from_stor
             except:
                 pass
             case_root = _case_root_from_manifest_path(bundle_root, source_manifest)
+            if(case_root is None):
+                # The path received here was derived from the active PDF link,
+                # and is a reliable equipment context when a legacy manifest
+                # lacks its own source path.
+                case_root = _case_root_from_manifest_path(bundle_root, normalized_missing)
             if(materialize_from_storage):
                 extracted = _read_iped_storage_content(bundle_root, storage_db, storage_id or md5_value, name or basename, md5_value, expected_size, case_root)
                 if(extracted is not None and os.path.exists(extracted)):

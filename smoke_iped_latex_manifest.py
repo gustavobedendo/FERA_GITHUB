@@ -111,23 +111,29 @@ def build_fixture(root):
 
     physical = b"FERA smoke fixture: exported physical evidence\n"
     stored = b"FERA smoke fixture: sqlite-storage-v1 evidence\n"
-    export_dir = root / "IPED" / "Exportados" / "arquivos"
+    equipment_root = root / "IPED" / "Eq02"
+    export_dir = equipment_root / "Exportados" / "arquivos"
     physical_path = export_dir / "already-exported.txt"
     physical_path.parent.mkdir(parents=True, exist_ok=True)
     physical_path.write_bytes(physical)
 
     storage_id = "SMOKE-STORAGE-001"
-    # Portable IPED keeps the operational databases below IPED/iped/storage.
-    # The locator remains relative to the IPED module, as emitted by IPED.
-    write_storage_db(root / "IPED" / "iped" / "storage" / "storage-0.db", storage_id, stored)
-    manifest_path = root / "sources" / "iped-latex-assets.jsonl"
+    # Every equipment uses the same storage-*.db names.  Eq01 deliberately
+    # contains the same storage id with different bytes: resolving the Eq02
+    # report must never select Eq01 merely because it is scanned first.
+    write_storage_db(root / "IPED" / "Eq01" / "iped" / "storage" / "storage-0.db", storage_id,
+                     b"FERA smoke fixture: wrong Eq01 evidence\n")
+    # Portable IPED keeps operational storage below the equipment's iped
+    # module; the locator is relative to that module.
+    write_storage_db(equipment_root / "iped" / "storage" / "storage-0.db", storage_id, stored)
+    manifest_path = equipment_root / "RelatoriosPDF" / "sources" / "iped-latex-assets.jsonl"
     write_manifest(manifest_path, physical, stored)
 
-    latex_dir = root / "latex" / "files"
+    latex_dir = equipment_root / "RelatoriosPDF" / "sources"
     latex_dir.mkdir(parents=True, exist_ok=True)
     fera_db = root / "FERA" / "fera-smoke.db"
     fera_db.parent.mkdir(parents=True, exist_ok=True)
-    report_path = latex_dir.parent / "fera-ipeds-latex-smoke.pdf"
+    report_path = equipment_root / "RelatoriosPDF" / "fera-ipeds-latex-smoke.pdf"
     write_smoke_pdf(report_path)
     global_settings.initiate_variables(commandline=True)
     status = build_db_with_reports_commandline(

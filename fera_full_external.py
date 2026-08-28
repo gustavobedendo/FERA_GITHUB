@@ -211,6 +211,7 @@ if __name__ == '__main__':
         else:
             global_settings.initiate_variables()
             global_settings.external_logo_enabled = True
+            global_settings.load_current_logo()
             global_settings.root.title("FERA "+global_settings.version+" - Forensics Evidence Report Analyzer -- Polícia Científica do Paraná")
             start_up_app()
     except Exception as ex:

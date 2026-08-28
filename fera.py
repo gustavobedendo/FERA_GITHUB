@@ -3910,15 +3910,9 @@ class MainWindow():
             self.logoframe.columnconfigure(0, weight=1)
             self.logoframe.grid(row=0, column=0, sticky='nswe')
             if(getattr(global_settings, 'external_logo_enabled', False)):
-                self.logo_images_frame = tkinter.Frame(self.logoframe, highlightthickness=0)
-                self.logo_images_frame.grid(row=0, column=0, sticky='n')
-                self.logo_images_frame.columnconfigure((0, 1), weight=1)
-                self.labelpcp = tkinter.Label(self.logo_images_frame, image=global_settings.tkphotologo2)
-                self.labelpcp.image = global_settings.tkphotologo2
-                self.labelpcp.grid(row=0, column=0, sticky='n', padx=(0, 4))
-                self.label_custom_logo = tkinter.Label(self.logo_images_frame, image=global_settings.tkphotologo_custom)
+                self.label_custom_logo = tkinter.Label(self.logoframe, image=global_settings.tkphotologo_custom)
                 self.label_custom_logo.image = global_settings.tkphotologo_custom
-                self.label_custom_logo.grid(row=0, column=1, sticky='n', padx=(4, 0))
+                self.label_custom_logo.grid(row=0, column=0, sticky='n', padx=4)
                 self.logo_credit_label = tkinter.Label(self.logoframe, font=global_settings.Font_tuple_Arial_8_logo, text=global_settings.LOGO_DEVELOPMENT_TEXT)
                 self.logo_credit_label.grid(row=1, column=0, sticky='n', padx=4, pady=(0, 4))
                 if(not global_settings.logo_customized):

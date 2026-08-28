@@ -43,7 +43,7 @@ allok=0
     
 LOGO_SETTINGS_SECTION = 'Logo'
 LOGO_SETTINGS_OPTION = 'custom_logo_path'
-LOGO_DEVELOPMENT_TEXT = 'Desenvolvido pela Seção Computação Forense - PCI-PR'
+LOGO_DEVELOPMENT_TEXT = 'Desenvolvido pela Seção de Computação Forense - PCI-PR'
 LOGO_MAX_SIZE = (128, 128)
 
 def get_settings_file():
@@ -51,6 +51,9 @@ def get_settings_file():
 
 def get_logo_storage_relative_path():
     return os.path.join('Imagens', 'logoCustom.png')
+
+def _external_logo_path():
+    return os.path.join(utilities_general.get_application_path(), 'Imagens', 'logoCustom.png')
 
 def _resolve_execution_path(path):
     if(os.path.isabs(path)):
@@ -68,6 +71,10 @@ def _read_custom_logo_path():
         absolute_path = _resolve_execution_path(relative_path)
         if(os.path.exists(absolute_path)):
             return absolute_path
+    if(getattr(sys.modules[__name__], 'external_logo_enabled', False)):
+        external_path = _external_logo_path()
+        if(os.path.exists(external_path)):
+            return external_path
     return None
 
 def _write_custom_logo_path(relative_path):

@@ -1,8 +1,11 @@
+import os
+
 block_cipher = None
+project_root = os.path.abspath(SPECPATH)
 
 
 a = Analysis(['fera_partial.py'],
-             pathex=['/media/sf_B_DRIVE/VISUALIZADOR/FERA'],
+             pathex=[project_root],
              binaries=[],
              datas=[('./ListasDeBusca/*', './ListasDeBusca'), ('./Imagens/*', './Imagens'), ('ffmpeg.exe','.'), ('whats_new.txt', '.')],
              hiddenimports=['PIL', 'PIL._imagingtk', 'PIL._tkinter_finder'],
