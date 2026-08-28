@@ -1,0 +1,8 @@
+================ 3.48 (29/05/2025) ================
+-Melhorias no teste de integridade
+-Correção de bug ao exportar mídias de marcadores
+
+================ 3.47 (14/01/2025) ================
+-Funcionalidade de teste de integridade da ferramenta
+
+

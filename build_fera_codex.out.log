@@ -1,0 +1,10 @@
+[FERA build] Ativando ambiente FERA: B:\ambientes\fera\Scripts\Activate.ps1
+[FERA build] Python do ambiente FERA: B:\ambientes\fera\Scripts\python.exe
+[FERA build] Verificando PyInstaller no ambiente FERA
+[FERA build] B:\ambientes\fera\Scripts\python.exe -m PyInstaller --noconfirm fera_partial_noconsole.spec
+[FERA build] Removendo B:\Visualizador\FERA\dist\FERA_WINDOWS
+[FERA build] Movendo B:\Visualizador\FERA\dist\fera para B:\Visualizador\FERA\dist\FERA_WINDOWS
+[FERA build] B:\ambientes\fera\Scripts\python.exe -m PyInstaller --noconfirm fera_noconsole.spec
+[FERA build] Removendo B:\Visualizador\FERA\dist\FERA_FULL_WINDOWS
+[FERA build] Movendo B:\Visualizador\FERA\dist\fera_full para B:\Visualizador\FERA\dist\FERA_FULL_WINDOWS
+[FERA build] Concluido. Saidas em B:\Visualizador\FERA\dist
